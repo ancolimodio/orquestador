@@ -49,9 +49,11 @@ class Workspace:
         return await asyncio.to_thread(path.read_text, encoding="utf-8")
 
     async def write(self, rel_path: str, content: str, *, allowed_prefixes: Iterable[str]) -> None:
-        ensure_path_writable(rel_path, allowed_prefixes)
-        ensure_no_secrets(content, where=rel_path)
         path = self._resolve(rel_path)
+        ensure_path_writable(rel_path, allowed_prefixes)
+        # Segunda barrera: los permisos también se validan sobre la ruta ya resuelta.
+        ensure_path_writable(path.relative_to(self.root).as_posix(), allowed_prefixes)
+        ensure_no_secrets(content, where=rel_path)
         await asyncio.to_thread(path.parent.mkdir, parents=True, exist_ok=True)
         await asyncio.to_thread(path.write_text, content, encoding="utf-8")
 

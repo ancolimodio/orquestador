@@ -72,9 +72,17 @@ def is_secret_file(path: str) -> bool:
 
 
 def ensure_path_writable(path: str, allowed_prefixes: Iterable[str]) -> None:
-    """Un agente solo escribe dentro de sus carpetas y nunca en archivos protegidos."""
-    normalized = PurePosixPath(path).as_posix()
-    if any(normalized == p or normalized.startswith(p) for p in PROTECTED_PATHS):
+    """Un agente solo escribe dentro de sus carpetas y nunca en archivos protegidos.
+
+    La ruta debe ser relativa y sin `..`: los permisos se validan sobre la ruta real,
+    no sobre un string que después se resuelve a otro lugar.
+    """
+    candidate = PurePosixPath(path.replace("\\", "/"))
+    if candidate.is_absolute() or ".." in candidate.parts:
+        raise GuardrailViolationError(f"Ruta no normalizada: {path}")
+    normalized = candidate.as_posix()
+    folded = normalized.casefold()
+    if any(folded == p.casefold() or folded.startswith(p.casefold()) for p in PROTECTED_PATHS):
         raise GuardrailViolationError(f"Archivo protegido por el harness: {path}")
     if is_secret_file(normalized):
         raise GuardrailViolationError(f"Archivo de secretos: {path}")

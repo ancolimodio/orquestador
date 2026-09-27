@@ -43,6 +43,21 @@ async def test_write_respects_scope_and_secrets(repo: Path) -> None:
         await ws.write("src/k.py", "k = '" + "AKIA" + "B" * 16 + "'", allowed_prefixes=["src/"])
 
 
+@pytest.mark.parametrize(
+    ("path", "prefixes"),
+    [("src/../AGENTS.md", ["src/"]), ("tests/../src/app/calc.py", ["tests/"])],
+)
+async def test_write_cannot_escape_scope_with_dotdot(
+    repo: Path, path: str, prefixes: list[str]
+) -> None:
+    before = {
+        p: p.read_text(encoding="utf-8") for p in (repo / "AGENTS.md", repo / "src/app/calc.py")
+    }
+    with pytest.raises(GuardrailViolationError):
+        await Workspace(repo).write(path, "pwned", allowed_prefixes=prefixes)
+    assert {p: p.read_text(encoding="utf-8") for p in before} == before
+
+
 async def test_read_many_skips_missing_files(repo: Path) -> None:
     files = await Workspace(repo).read_many(["src/app/calc.py", "src/missing.py"])
     assert list(files) == ["src/app/calc.py"]

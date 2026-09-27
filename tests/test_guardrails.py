@@ -67,6 +67,26 @@ def test_protected_or_out_of_scope_paths(path: str) -> None:
         ensure_path_writable(path, ["src/"])
 
 
+@pytest.mark.parametrize(
+    "path",
+    [
+        "src/../AGENTS.md",
+        "src\\..\\pyproject.toml",
+        "tests/../src/app.py",
+        "/etc/passwd",
+        "src/AGENTS.md/../../agents.md",
+    ],
+)
+def test_non_normalized_paths_are_blocked(path: str) -> None:
+    with pytest.raises(GuardrailViolationError):
+        ensure_path_writable(path, ["src/", "tests/"])
+
+
+def test_protected_paths_ignore_case() -> None:
+    with pytest.raises(GuardrailViolationError):
+        ensure_path_writable("PyProject.toml", [""])
+
+
 def test_path_inside_scope_is_writable() -> None:
     ensure_path_writable("src/app/calc.py", ["src/"])
 

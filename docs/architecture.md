@@ -31,7 +31,7 @@ Prompt Maestro separa **quién decide** (los agentes, apoyados en un modelo) de 
 El harness asume que el modelo **puede equivocarse o ser manipulado** (por ejemplo, con instrucciones escondidas en el código que lee). Por eso los controles no dependen de su obediencia:
 
 - **Confinamiento de rutas:** toda ruta se resuelve y se verifica que quede dentro del repo.
-- **Permisos por rol:** el Implementer solo escribe en `src/`, el Tester solo en `tests/`, y nadie modifica `AGENTS.md`, `pyproject.toml` ni el CI.
+- **Permisos por rol:** el Implementer solo escribe en `src/`, el Tester solo en `tests/`, y nadie modifica `AGENTS.md`, `pyproject.toml` ni el CI. Los permisos se validan sobre la ruta resuelta, así que `..` no sirve para salir del alcance.
 - **Secretos:** se bloquea la lectura de `.env`, claves y certificados, y se escanea todo contenido antes de escribirlo.
 - **Comandos:** una lista de patrones prohibidos (borrados recursivos, `push --force`, red, instalación de dependencias) se verifica antes de ejecutar.
 - **Entorno:** los procesos hijos heredan solo variables de una allowlist, así que las API keys nunca llegan a los comandos de verificación.
