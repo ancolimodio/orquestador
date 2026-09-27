@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from typing import Protocol
 
 from prompt_maestro.models import CheckResult, GateResult
-from prompt_maestro.sandbox import Sandbox
+from prompt_maestro.sandbox import CommandRunner
 
 
 @dataclass(frozen=True, slots=True)
@@ -35,7 +35,7 @@ class SandboxGateRunner:
 
     def __init__(
         self,
-        sandbox: Sandbox,
+        sandbox: CommandRunner,
         gates: Mapping[str, tuple[CheckSpec, ...]] = DEFAULT_GATES,
         *,
         max_parallel: int = 3,

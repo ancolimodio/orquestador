@@ -97,7 +97,7 @@ Reglas de contexto:
 - Modificar este `AGENTS.md`, `pyproject.toml`, la configuración de CI o los permisos del harness.
 - Desactivar, saltear o marcar como `skip` un test para que un gate pase.
 
-Todo comando se ejecuta dentro del sandbox del proyecto (contenedor efímero), nunca en el entorno del usuario.
+Los gates corren en un contenedor efímero sin red y con el repo en solo lectura (`ContainerSandbox`, `--container-image`). Sin imagen configurada, el harness usa `Sandbox`, que corre en el host sin aislar archivos ni red, y lo avisa.
 
 ---
 

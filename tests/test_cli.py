@@ -1,6 +1,9 @@
+from pathlib import Path
+
 import pytest
 
 from prompt_maestro import cli
+from prompt_maestro.sandbox import ContainerSandbox, Sandbox
 
 
 def test_cli_requires_api_key(
@@ -18,3 +21,21 @@ def test_parser_defaults() -> None:
     args = cli.build_parser().parse_args(["run", "req", "--max-attempts", "5"])
     assert args.requirement == "req"
     assert args.max_attempts == 5
+
+
+def test_container_image_selects_container_sandbox(tmp_path: Path) -> None:
+    args = cli.build_parser().parse_args(
+        ["run", "req", "--repo", str(tmp_path), "--container-image", "pm-gates:latest"]
+    )
+    runner = cli.build_runner(args)
+    assert isinstance(runner, ContainerSandbox)
+    assert runner.image == "pm-gates:latest"
+
+
+def test_host_sandbox_warns_about_missing_isolation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.delenv("PM_CONTAINER_IMAGE", raising=False)
+    args = cli.build_parser().parse_args(["run", "req", "--repo", str(tmp_path)])
+    assert isinstance(cli.build_runner(args), Sandbox)
+    assert "sin aislamiento" in capsys.readouterr().err

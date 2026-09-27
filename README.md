@@ -98,7 +98,17 @@ Intentos por gate: {'A': 1, 'B': 2, 'C': 2, 'D': 1}
 ```bash
 export ANTHROPIC_API_KEY=...
 prompt-maestro run "Agregá validación de email al registro de usuarios" \
-  --repo ../mi-proyecto --events eventos.jsonl
+  --repo ../mi-proyecto --events eventos.jsonl \
+  --container-image mi-proyecto-gates:latest
+```
+
+Con `--container-image`, cada check corre en un contenedor efímero sin red y con el repo en solo lectura. La imagen debe traer `ruff`, `mypy`, `pytest`, `bandit` y las dependencias del proyecto. Sin esa opción, los tests generados corren en el host y el CLI lo avisa.
+
+`docker/gates.Dockerfile` es una imagen de referencia con las herramientas de los gates; extendela con las dependencias de tu proyecto. También sirve para correr los tests de integración con Docker real, que son opt-in:
+
+```bash
+docker build -t prompt-maestro-gates -f docker/gates.Dockerfile .
+PM_TEST_CONTAINER_IMAGE=prompt-maestro-gates pytest tests/test_container_integration.py
 ```
 
 La salida es un `TaskReport` en JSON con el plan, la revisión, los archivos cambiados, los intentos por gate y, si corresponde, el motivo del escalamiento.
@@ -165,7 +175,7 @@ prompt-maestro/
 │   ├── agents/             # Planner, Implementer, Tester, Reviewer
 │   ├── models.py           # Contratos de handoff (Pydantic v2)
 │   ├── gates.py            # Checks por gate, ejecutados en paralelo
-│   ├── sandbox.py          # Ejecución con timeout y entorno mínimo
+│   ├── sandbox.py          # Ejecución en contenedor efímero o en el host, con timeout
 │   ├── guardrails.py       # Comandos prohibidos, secretos, áreas sensibles
 │   ├── workspace.py        # Acceso confinado al repositorio
 │   ├── llm.py              # Protocol LLMClient + cliente async de Anthropic
@@ -179,7 +189,6 @@ prompt-maestro/
 
 ## Roadmap
 
-- Ejecución de gates dentro de contenedores efímeros (Docker) por tarea.
 - Métricas de tokens y costo por fase.
 - Planner con análisis de símbolos vía AST en lugar de búsqueda textual.
 - Suite de evals sobre tareas reales para comparar harnesses y modelos.

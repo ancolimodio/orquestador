@@ -10,8 +10,8 @@ Prompt Maestro separa **quién decide** (los agentes, apoyados en un modelo) de 
 | Agentes | `agents/` | Un rol cada uno: planificar, implementar, testear, revisar | LLMClient, prompts, models |
 | Contratos | `models.py` | Esquemas Pydantic de cada handoff y de los resultados | — |
 | Workspace | `workspace.py` | Lectura y escritura confinada al repo; valida el plan (Gate A) | guardrails |
-| Sandbox | `sandbox.py` | Ejecuta comandos con timeout, salida acotada y entorno mínimo | guardrails |
-| GateRunner | `gates.py` | Agrupa checks por gate y los corre en paralelo | Sandbox |
+| Sandbox | `sandbox.py` | `CommandRunner`: `ContainerSandbox` (contenedor efímero sin red) o `Sandbox` (host), con timeout, salida acotada y entorno mínimo | guardrails |
+| GateRunner | `gates.py` | Agrupa checks por gate y los corre en paralelo | CommandRunner |
 | Guardrails | `guardrails.py` | Reglas deterministas: comandos, secretos, rutas, áreas sensibles | — |
 | LLMClient | `llm.py` | Protocol del modelo + cliente async de Anthropic | httpx |
 | EventLog | `observability.py` | Eventos estructurados y métricas por tarea | — |
@@ -36,7 +36,9 @@ El harness asume que el modelo **puede equivocarse o ser manipulado** (por ejemp
 - **Comandos:** una lista de patrones prohibidos (borrados recursivos, `push --force`, red, instalación de dependencias) se verifica antes de ejecutar.
 - **Entorno:** los procesos hijos heredan solo variables de una allowlist, así que las API keys nunca llegan a los comandos de verificación.
 
-El Sandbox es una segunda barrera, no la única: en producción, cada tarea debería correr en un contenedor efímero sin red.
+- **Aislamiento:** el Gate C ejecuta tests escritos por un agente, así que los guardrails de comandos no alcanzan. `ContainerSandbox` corre cada check en un contenedor efímero: sin red, repo montado en solo lectura, `/tmp` en tmpfs, sin capabilities, `no-new-privileges`, usuario sin privilegios y límites de memoria, CPU y procesos. Si vence el timeout, el contenedor se elimina por nombre (`rm --force`).
+
+La imagen del contenedor debe traer las herramientas de los gates y las dependencias del proyecto, porque adentro no hay red. `Sandbox` (host) queda para desarrollo y demos: aísla el entorno, pero no el sistema de archivos ni la red.
 
 ## Extensibilidad
 

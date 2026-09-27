@@ -1,11 +1,13 @@
+import json
 import sys
 from pathlib import Path
+from typing import Any
 
 import pytest
 
 from prompt_maestro.errors import GuardrailViolationError
 from prompt_maestro.gates import CheckSpec, SandboxGateRunner
-from prompt_maestro.sandbox import Sandbox
+from prompt_maestro.sandbox import ContainerSandbox, Sandbox
 
 
 async def test_runs_command_and_captures_output(tmp_path: Path) -> None:
@@ -60,6 +62,63 @@ async def test_gate_runner_runs_checks_in_parallel(tmp_path: Path) -> None:
 async def test_unknown_gate_passes_empty(tmp_path: Path) -> None:
     result = await SandboxGateRunner(Sandbox(tmp_path), {}).run_gate("Z")
     assert result.passed and result.checks == []
+
+
+FAKE_RUNTIME = """
+import json, pathlib, sys, time
+args = sys.argv[1:]
+if args[:2] == ["rm", "--force"]:
+    pathlib.Path(sys.argv[0]).with_name("removed.txt").write_text(args[2])
+    raise SystemExit(0)
+inner = args[args.index("img") + 1 :]
+if inner == ["slow"]:
+    time.sleep(5)
+print(json.dumps(args))
+raise SystemExit(int(inner[-1]) if inner[-1].isdigit() else 0)
+"""
+
+
+def _container(tmp_path: Path, **kwargs: Any) -> ContainerSandbox:
+    script = tmp_path / "fake_runtime.py"
+    script.write_text(FAKE_RUNTIME, encoding="utf-8")
+    return ContainerSandbox(tmp_path, image="img", runtime=(sys.executable, str(script)), **kwargs)
+
+
+def test_container_command_isolates_network_and_repo(tmp_path: Path) -> None:
+    cmd = ContainerSandbox(tmp_path, image="img").build_command(
+        ["pytest", "-q"], container_name="c1"
+    )
+    assert cmd[:2] == ["docker", "run"]
+    joined = " ".join(cmd)
+    assert "--network none" in joined
+    assert "--read-only" in joined
+    assert "--cap-drop ALL" in joined
+    assert f"source={tmp_path.resolve()},target=/workspace,readonly" in joined
+    assert cmd[-3:] == ["img", "pytest", "-q"]
+
+
+def test_container_does_not_forward_host_secrets(tmp_path: Path) -> None:
+    sandbox = ContainerSandbox(tmp_path, image="img", env={"ANTHROPIC_API_KEY": "leak"})
+    assert "leak" not in " ".join(sandbox.build_command(["pytest"], container_name="c"))
+
+
+async def test_container_run_reports_inner_command_and_exit_code(tmp_path: Path) -> None:
+    result = await _container(tmp_path).run(["pytest", "3"], name="pytest")
+    assert result.command == ["pytest", "3"]
+    assert result.returncode == 3
+    assert "--network" in json.loads(result.output)
+
+
+async def test_container_timeout_removes_the_container_by_name(tmp_path: Path) -> None:
+    result = await _container(tmp_path, timeout_s=0.5).run(["slow"], name="slow")
+    assert result.returncode == -1
+    assert "Timeout" in result.output
+    assert (tmp_path / "removed.txt").read_text().startswith("prompt-maestro-")
+
+
+async def test_container_applies_command_guardrails(tmp_path: Path) -> None:
+    with pytest.raises(GuardrailViolationError):
+        await _container(tmp_path).run(["curl", "https://example.com"], name="net")
 
 
 async def test_host_sandbox_can_run_asyncio_programs(tmp_path: Path) -> None:

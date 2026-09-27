@@ -11,7 +11,7 @@ from prompt_maestro.llm import AnthropicLLM
 from prompt_maestro.models import TaskStatus
 from prompt_maestro.observability import EventLog
 from prompt_maestro.orchestrator import Orchestrator, OrchestratorConfig
-from prompt_maestro.sandbox import Sandbox
+from prompt_maestro.sandbox import CommandRunner, ContainerSandbox, Sandbox
 from prompt_maestro.workspace import Workspace
 
 
@@ -24,7 +24,25 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--model", default=os.environ.get("PM_MODEL", "claude-sonnet-5"))
     run.add_argument("--max-attempts", type=int, default=3, help="Reintentos por gate.")
     run.add_argument("--events", type=Path, default=None, help="Archivo JSONL de eventos.")
+    run.add_argument(
+        "--container-image",
+        default=os.environ.get("PM_CONTAINER_IMAGE"),
+        help="Corre los gates en contenedores efímeros sin red con esta imagen (recomendado).",
+    )
+    run.add_argument("--container-runtime", default="docker", help="docker o podman.")
     return parser
+
+
+def build_runner(args: argparse.Namespace) -> CommandRunner:
+    if args.container_image:
+        return ContainerSandbox(
+            args.repo, image=args.container_image, runtime=(args.container_runtime,)
+        )
+    print(
+        "Aviso: sin --container-image, los tests generados corren en el host sin aislamiento.",
+        file=sys.stderr,
+    )
+    return Sandbox(args.repo)
 
 
 async def _run(args: argparse.Namespace) -> int:
@@ -37,7 +55,7 @@ async def _run(args: argparse.Namespace) -> int:
         orchestrator = Orchestrator(
             llm=llm,
             workspace=Workspace(args.repo),
-            gate_runner=SandboxGateRunner(Sandbox(args.repo)),
+            gate_runner=SandboxGateRunner(build_runner(args)),
             events=EventLog(args.events),
             config=OrchestratorConfig(max_attempts_per_gate=args.max_attempts),
         )
