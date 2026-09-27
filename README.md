@@ -1,6 +1,6 @@
 # Prompt Maestro
 
-[![CI](https://github.com/USUARIO/prompt-maestro/actions/workflows/ci.yml/badge.svg)](https://github.com/USUARIO/prompt-maestro/actions/workflows/ci.yml)
+[![CI](https://github.com/ancolimodio/orquestador/actions/workflows/ci.yml/badge.svg)](https://github.com/ancolimodio/orquestador/actions/workflows/ci.yml)
 ![Python](https://img.shields.io/badge/python-3.12%2B-blue)
 ![mypy](https://img.shields.io/badge/mypy-strict-informational)
 ![License](https://img.shields.io/badge/license-MIT-green)
@@ -66,8 +66,8 @@ Más detalle en [`docs/architecture.md`](docs/architecture.md).
 ## Inicio rápido
 
 ```bash
-git clone https://github.com/USUARIO/prompt-maestro.git
-cd prompt-maestro
+git clone https://github.com/ancolimodio/orquestador.git
+cd orquestador
 python -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
 ```
