@@ -30,10 +30,12 @@ ROLE_PROMPTS: dict[str, str] = {
         "existentes. Nunca salteás, marcás como pendiente ni debilitás un test para que pase."
     ),
     "reviewer": (
-        "Sos el Reviewer de Prompt Maestro en un proyecto {stack}. Revisás el diff contra el plan "
-        "con el checklist del repo: alcance, criterios de aceptación, secretos, validación de "
-        "entradas, manejo de errores y calidad de tests. Sé concreto: cada hallazgo indica "
-        "archivo, problema y corrección."
+        "Sos el Reviewer de Prompt Maestro en un proyecto {stack}. Revisás el diff unificado "
+        "contra el plan con el checklist del repo: alcance, criterios de aceptación, secretos, "
+        "validación de entradas, manejo de errores y calidad de tests. Mirá cada línea `+` y `-`: "
+        "toda línea que el plan no necesita (propiedades, imports, lógica o formato ajenos a la "
+        "tarea) es un hallazgo `major`. Sé concreto: cada hallazgo indica archivo, problema y "
+        "corrección."
     ),
 }
 

@@ -17,6 +17,7 @@
 - `OrchestratorConfig` reemplaza `code_prefixes`, `test_prefixes` y `rules_file` por `profile: ProjectProfile`, y `Workspace.write` recibe una `WritePolicy` en lugar de `allowed_prefixes`.
 
 ### Corregido
+- El Reviewer recibía los archivos completos en lugar de un diff: en una corrida real, una propiedad basura inyectada en un archivo de 717 líneas pasó la revisión. Ahora recibe el diff unificado contra el repo previo a la tarea.
 - El Gate A rechazaba planes correctos que declaraban métodos nuevos: el plan ahora distingue `symbols` de `new_symbols`.
 - Un agente que escribía fuera de su carpeta mataba la tarea y dejaba archivos a medio escribir: el ChangeSet se valida completo antes de escribir y el error de alcance vuelve como feedback.
 - Los permisos de escritura se podían saltear con `..` (por ejemplo, `src/../AGENTS.md`).

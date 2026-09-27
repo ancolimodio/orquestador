@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from functools import partial
 
 from prompt_maestro.agents import Implementer, Planner, Reviewer, Tester
+from prompt_maestro.diffs import unified_diff
 from prompt_maestro.errors import (
     EscalationRequiredError,
     GuardrailViolationError,
@@ -49,6 +50,8 @@ class _TaskState:
     changed_files: set[str] = field(default_factory=set)
     plan: Plan | None = None
     preexisting_tests: frozenset[str] = frozenset()
+    # Contenido de cada archivo antes de que la tarea lo tocara (None: no existía).
+    originals: dict[str, str | None] = field(default_factory=dict)
 
 
 @dataclass(slots=True)
@@ -193,7 +196,7 @@ class Orchestrator:
             attempt = self._next_attempt(state, "D")
             gate_d = await self._gates.run_gate("D")
             review = await team.reviewer.run(
-                plan=plan, implementation=implementation, tests=tests, static_analysis=gate_d
+                plan=plan, diff=await self._task_diff(state), static_analysis=gate_d
             )
             approved = gate_d.passed and review.approved
             await self._emit(
@@ -226,8 +229,23 @@ class Orchestrator:
 
     async def _apply(self, state: _TaskState, changes: ChangeSet, policy: WritePolicy) -> None:
         for change in changes.changes:
+            path = policy.safe_path(change.path)
+            if path not in state.originals:
+                # Solo la primera escritura: el diff es contra el repo previo a la tarea,
+                # aunque el agente haya reescrito el archivo en varias vueltas.
+                exists = await self._ws.exists(path)
+                state.originals[path] = await self._ws.read(path) if exists else None
             await self._ws.write(change.path, change.content, policy=policy)
             state.changed_files.add(change.path)
+
+    async def _task_diff(self, state: _TaskState) -> str:
+        """Diff unificado de todo lo que la tarea cambió hasta ahora, archivo por archivo."""
+        current = await self._ws.read_many(state.originals)
+        diffs = (
+            unified_diff(path, before, current.get(path, ""))
+            for path, before in sorted(state.originals.items())
+        )
+        return "\n\n".join(d for d in diffs if d)
 
     async def _request_changes(
         self,
