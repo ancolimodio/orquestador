@@ -1,6 +1,7 @@
 """Acceso confinado al repositorio de trabajo."""
 
 import asyncio
+import re
 from collections.abc import Iterable
 from pathlib import Path
 
@@ -46,7 +47,10 @@ class Workspace:
         size = (await asyncio.to_thread(path.stat)).st_size
         if size > self.max_file_bytes:
             raise GuardrailViolationError(f"Archivo demasiado grande para el contexto: {rel_path}")
-        return await asyncio.to_thread(path.read_text, encoding="utf-8")
+        try:
+            return await asyncio.to_thread(path.read_text, encoding="utf-8")
+        except UnicodeDecodeError as exc:
+            raise GuardrailViolationError(f"Archivo no es texto UTF-8: {rel_path}") from exc
 
     async def write(self, rel_path: str, content: str, *, allowed_prefixes: Iterable[str]) -> None:
         path = self._resolve(rel_path)
@@ -59,12 +63,17 @@ class Workspace:
 
     async def read_many(self, rel_paths: Iterable[str]) -> dict[str, str]:
         """Lee en paralelo solo los archivos que existen."""
-        paths = [p for p in dict.fromkeys(rel_paths)]
-        async with asyncio.TaskGroup() as tg:
-            checks = {p: tg.create_task(self.exists(p)) for p in paths}
-        existing = [p for p, task in checks.items() if task.result()]
-        async with asyncio.TaskGroup() as tg:
-            reads = {p: tg.create_task(self.read(p)) for p in existing}
+        paths = list(dict.fromkeys(rel_paths))
+        try:
+            async with asyncio.TaskGroup() as tg:
+                checks = {p: tg.create_task(self.exists(p)) for p in paths}
+            existing = [p for p, task in checks.items() if task.result()]
+            async with asyncio.TaskGroup() as tg:
+                reads = {p: tg.create_task(self.read(p)) for p in existing}
+        except* GuardrailViolationError as group:
+            # TaskGroup envuelve los errores en un ExceptionGroup: se propaga el de dominio
+            # para que el Orchestrator lo trate como cualquier otra violación.
+            raise group.exceptions[0] from group
         return {p: task.result() for p, task in reads.items()}
 
     def _walk(self, max_entries: int) -> list[str]:
@@ -102,6 +111,7 @@ class Workspace:
             content = await self.read(item.path)
             for symbol in item.symbols:
                 name = symbol.rsplit(".", 1)[-1]
-                if name not in content:
+                # Identificador completo: `add` no se valida con `address` ni `padding`.
+                if not re.search(rf"(?<!\w){re.escape(name)}(?!\w)", content):
                     errors.append(f"{item.path}: el símbolo '{symbol}' no aparece en el archivo.")
         return errors

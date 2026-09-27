@@ -121,3 +121,16 @@ def test_regular_test_is_not_weakening() -> None:
     ensure_no_test_weakening(
         "def test_skip_list() -> None:\n    assert skip_list([]) == []\n", where="t"
     )
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("src/users/user_password.py", ["password"]),
+        ("Agregar autenticación con tokens", ["auth", "token"]),
+        ("Mostrar el author del post", []),
+        ("Usar el tokenizer nuevo", []),
+    ],
+)
+def test_sensitive_areas_match_whole_words(text: str, expected: list[str]) -> None:
+    assert sensitive_areas([text]) == expected

@@ -109,21 +109,33 @@ def ensure_no_test_weakening(text: str, *, where: str) -> None:
         )
 
 
-SENSITIVE_KEYWORDS: tuple[str, ...] = (
-    "auth",
-    "login",
-    "password",
-    "payment",
-    "pago",
-    "billing",
-    "credential",
-    "secret",
-    "token",
-    "pii",
+SENSITIVE_KEYWORDS: dict[str, tuple[str, ...]] = {
+    "auth": ("auth", "authn", "authz", "authentication", "authorization", "autenticación"),
+    "login": ("login", "logins", "signin", "logout"),
+    "password": ("password", "passwords", "passwd", "contraseña", "contraseñas"),
+    "payment": ("payment", "payments"),
+    "pago": ("pago", "pagos"),
+    "billing": ("billing",),
+    "credential": ("credential", "credentials", "credencial", "credenciales"),
+    "secret": ("secret", "secrets"),
+    "token": ("token", "tokens"),
+    "pii": ("pii",),
+}
+
+
+def _whole_word(forms: Iterable[str]) -> re.Pattern[str]:
+    # Límite de palabra solo por letras: `_`, `/` o `.` separan ("user_password", "auth/"),
+    # pero "author" o "tokenizer" no cuentan como "auth" o "token".
+    alternatives = "|".join(re.escape(f) for f in forms)
+    return re.compile(rf"(?<![^\W\d_])(?:{alternatives})(?![^\W\d_])")
+
+
+_SENSITIVE_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = tuple(
+    (keyword, _whole_word(forms)) for keyword, forms in SENSITIVE_KEYWORDS.items()
 )
 
 
 def sensitive_areas(texts: Iterable[str]) -> list[str]:
     """Palabras sensibles presentes: auth, pagos o datos personales requieren a un humano."""
     joined = " ".join(texts).lower()
-    return [k for k in SENSITIVE_KEYWORDS if re.search(rf"\b{k}", joined)]
+    return [keyword for keyword, pattern in _SENSITIVE_PATTERNS if pattern.search(joined)]

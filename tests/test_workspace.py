@@ -82,3 +82,22 @@ async def test_validate_plan_reports_hallucinations(repo: Path) -> None:
     assert len(errors) == 4
     assert any("ghost.py" in e for e in errors)
     assert any("multiply" in e for e in errors)
+
+
+async def test_validate_plan_requires_whole_identifiers(repo: Path) -> None:
+    (repo / "src" / "app" / "net.py").write_text("address = '1.2.3.4'\n", encoding="utf-8")
+    plan = _plan(ImpactedItem(path="src/app/net.py", symbols=["add"], change=ChangeKind.MODIFY))
+    errors = await Workspace(repo).validate_plan(plan)
+    assert errors and "'add'" in errors[0]
+
+
+async def test_read_many_raises_domain_error_not_exception_group(repo: Path) -> None:
+    (repo / "src" / "big.py").write_text("x" * 100, encoding="utf-8")
+    with pytest.raises(GuardrailViolationError, match="demasiado grande"):
+        await Workspace(repo, max_file_bytes=50).read_many(["src/app/calc.py", "src/big.py"])
+
+
+async def test_non_utf8_file_is_a_domain_error(repo: Path) -> None:
+    (repo / "src" / "blob.py").write_bytes(b"\xff\xfe\x00binary")
+    with pytest.raises(GuardrailViolationError, match="UTF-8"):
+        await Workspace(repo).read("src/blob.py")
