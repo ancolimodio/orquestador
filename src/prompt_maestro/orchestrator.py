@@ -14,13 +14,7 @@ from prompt_maestro.errors import (
     LLMError,
 )
 from prompt_maestro.gates import GateRunner
-from prompt_maestro.guardrails import (
-    ensure_no_secrets,
-    ensure_no_test_weakening,
-    ensure_path_safe,
-    out_of_scope,
-    sensitive_areas,
-)
+from prompt_maestro.guardrails import WritePolicy, ensure_no_test_weakening, sensitive_areas
 from prompt_maestro.llm import LLMClient
 from prompt_maestro.models import (
     ChangeKind,
@@ -32,6 +26,7 @@ from prompt_maestro.models import (
     TaskStatus,
 )
 from prompt_maestro.observability import Event, EventLog
+from prompt_maestro.project import ProjectProfile
 from prompt_maestro.workspace import Workspace
 
 
@@ -39,9 +34,8 @@ from prompt_maestro.workspace import Workspace
 class OrchestratorConfig:
     max_attempts_per_gate: int = 3
     escalate_sensitive_areas: bool = True
-    code_prefixes: tuple[str, ...] = ("src/",)
-    test_prefixes: tuple[str, ...] = ("tests/",)
-    rules_file: str = "AGENTS.md"
+    # Stack, alcance de cada rol, archivos protegidos y reglas del repo de destino.
+    profile: ProjectProfile = field(default_factory=ProjectProfile)
     max_context_tests: int = 20
     allow_modifying_existing_tests: bool = False
 
@@ -109,14 +103,15 @@ class Orchestrator:
     # --- fases -----------------------------------------------------------------
 
     async def _build_team(self) -> _Team:
+        profile = self.config.profile
         rules = ""
-        if await self._ws.exists(self.config.rules_file):
-            rules = await self._ws.read(self.config.rules_file)
+        if await self._ws.exists(profile.rules_file):
+            rules = await self._ws.read(profile.rules_file)
         return _Team(
-            planner=Planner(self._llm, harness_rules=rules),
-            implementer=Implementer(self._llm, harness_rules=rules),
-            tester=Tester(self._llm, harness_rules=rules),
-            reviewer=Reviewer(self._llm, harness_rules=rules),
+            planner=Planner(self._llm, harness_rules=rules, profile=profile),
+            implementer=Implementer(self._llm, harness_rules=rules, profile=profile),
+            tester=Tester(self._llm, harness_rules=rules, profile=profile),
+            reviewer=Reviewer(self._llm, harness_rules=rules, profile=profile),
         )
 
     async def _plan_phase(self, state: _TaskState, team: _Team, requirement: str) -> Plan:
@@ -164,11 +159,11 @@ class Orchestrator:
                 state,
                 gate="B",
                 agent="implementer",
-                prefixes=self.config.code_prefixes,
+                policy=self.config.profile.code_policy,
                 ask=partial(team.implementer.run, plan=plan, files=files),
                 feedback=impl_feedback,
             )
-            await self._apply(state, implementation, self.config.code_prefixes)
+            await self._apply(state, implementation, self.config.profile.code_policy)
             gate_b = await self._run_gate(state, "B", "implementer")
             if not gate_b.passed:
                 impl_feedback = gate_b.failure_report()
@@ -178,7 +173,7 @@ class Orchestrator:
                 state,
                 gate="C",
                 agent="tester",
-                prefixes=self.config.test_prefixes,
+                policy=self.config.profile.test_policy,
                 ask=partial(
                     team.tester.run,
                     plan=plan,
@@ -187,7 +182,7 @@ class Orchestrator:
                 ),
                 feedback=test_feedback,
             )
-            await self._apply(state, tests, self.config.test_prefixes)
+            await self._apply(state, tests, self.config.profile.test_policy)
             gate_c = await self._run_gate(state, "C", "tester")
             if not gate_c.passed:
                 # La falla puede estar en el código o en el test: la ven los dos agentes.
@@ -229,11 +224,9 @@ class Orchestrator:
             self._record_failure(state, gate, attempt, "falló")
         return result
 
-    async def _apply(
-        self, state: _TaskState, changes: ChangeSet, prefixes: tuple[str, ...]
-    ) -> None:
+    async def _apply(self, state: _TaskState, changes: ChangeSet, policy: WritePolicy) -> None:
         for change in changes.changes:
-            await self._ws.write(change.path, change.content, allowed_prefixes=prefixes)
+            await self._ws.write(change.path, change.content, policy=policy)
             state.changed_files.add(change.path)
 
     async def _request_changes(
@@ -242,7 +235,7 @@ class Orchestrator:
         *,
         gate: str,
         agent: str,
-        prefixes: tuple[str, ...],
+        policy: WritePolicy,
         ask: Callable[..., Awaitable[ChangeSet]],
         feedback: str,
     ) -> ChangeSet:
@@ -255,7 +248,7 @@ class Orchestrator:
         """
         while True:
             changes = await ask(feedback=feedback)
-            problems = self._validate_changes(state, changes, prefixes, is_tests=gate == "C")
+            problems = self._validate_changes(state, changes, policy, is_tests=gate == "C")
             if not problems:
                 return changes
             attempt = self._next_attempt(state, gate)
@@ -267,13 +260,13 @@ class Orchestrator:
 
     @staticmethod
     def _validate_changes(
-        state: _TaskState, changes: ChangeSet, prefixes: tuple[str, ...], *, is_tests: bool
+        state: _TaskState, changes: ChangeSet, policy: WritePolicy, *, is_tests: bool
     ) -> list[str]:
         """Escala ante lo sospechoso y devuelve los problemas de alcance recuperables."""
         problems: list[str] = []
         for change in changes.changes:
-            path = ensure_path_safe(change.path)
-            ensure_no_secrets(change.content, where=change.path)
+            path = policy.safe_path(change.path)
+            policy.check_content(change.content, where=change.path)
             if is_tests:
                 # El Tester agrega tests; no reescribe ni debilita los que protegían el repo.
                 if path.casefold() in state.preexisting_tests:
@@ -281,22 +274,22 @@ class Orchestrator:
                         f"El Tester no puede modificar un test existente: {change.path}"
                     )
                 ensure_no_test_weakening(change.content, where=change.path)
-            reason = out_of_scope(path, prefixes)
+            reason = policy.scope.reason(path)
             if reason:
                 problems.append(reason)
         return problems
 
+    async def _test_files(self) -> list[str]:
+        scope = self.config.profile.test_policy.scope
+        return [p for p in await self._ws.repo_map() if scope.contains(p)]
+
     async def _preexisting_tests(self) -> frozenset[str]:
         if self.config.allow_modifying_existing_tests:
             return frozenset()
-        repo_map = await self._ws.repo_map()
-        return frozenset(p.casefold() for p in repo_map if p.startswith(self.config.test_prefixes))
+        return frozenset(p.casefold() for p in await self._test_files())
 
     async def _existing_tests(self) -> dict[str, str]:
-        repo_map = await self._ws.repo_map()
-        paths = [
-            p for p in repo_map if p.startswith(self.config.test_prefixes) and p.endswith(".py")
-        ][: self.config.max_context_tests]
+        paths = (await self._test_files())[: self.config.max_context_tests]
         return await self._ws.read_many(paths)
 
     @staticmethod

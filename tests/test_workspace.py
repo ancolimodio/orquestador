@@ -4,8 +4,13 @@ from pathlib import Path
 import pytest
 
 from prompt_maestro.errors import GuardrailViolationError
+from prompt_maestro.guardrails import RoleScope, WritePolicy
 from prompt_maestro.models import ChangeKind, ImpactedItem, Plan
 from prompt_maestro.workspace import Workspace
+
+
+def _policy(*allowed: str) -> WritePolicy:
+    return WritePolicy(RoleScope(allowed))
 
 
 def _plan(*items: ImpactedItem) -> Plan:
@@ -36,12 +41,12 @@ async def test_large_files_are_rejected(repo: Path) -> None:
 
 async def test_write_respects_scope_and_secrets(repo: Path) -> None:
     ws = Workspace(repo)
-    await ws.write("src/app/new.py", "VALUE = 1\n", allowed_prefixes=["src/"])
+    await ws.write("src/app/new.py", "VALUE = 1\n", policy=_policy("src/"))
     assert (repo / "src" / "app" / "new.py").read_text(encoding="utf-8") == "VALUE = 1\n"
     with pytest.raises(GuardrailViolationError):
-        await ws.write("tests/test_x.py", "", allowed_prefixes=["src/"])
+        await ws.write("tests/test_x.py", "", policy=_policy("src/"))
     with pytest.raises(GuardrailViolationError):
-        await ws.write("src/k.py", "k = '" + "AKIA" + "B" * 16 + "'", allowed_prefixes=["src/"])
+        await ws.write("src/k.py", "k = '" + "AKIA" + "B" * 16 + "'", policy=_policy("src/"))
 
 
 @pytest.mark.parametrize(
@@ -55,7 +60,7 @@ async def test_write_cannot_escape_scope_with_dotdot(
         p: p.read_text(encoding="utf-8") for p in (repo / "AGENTS.md", repo / "src/app/calc.py")
     }
     with pytest.raises(GuardrailViolationError):
-        await Workspace(repo).write(path, "pwned", allowed_prefixes=prefixes)
+        await Workspace(repo).write(path, "pwned", policy=_policy(*prefixes))
     assert {p: p.read_text(encoding="utf-8") for p in before} == before
 
 

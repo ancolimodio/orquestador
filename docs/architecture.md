@@ -33,7 +33,7 @@ Prompt Maestro separa **quién decide** (los agentes, apoyados en un modelo) de 
 El harness asume que el modelo **puede equivocarse o ser manipulado** (por ejemplo, con instrucciones escondidas en el código que lee). Por eso los controles no dependen de su obediencia:
 
 - **Confinamiento de rutas:** toda ruta se resuelve y se verifica que quede dentro del repo.
-- **Permisos por rol:** el Implementer solo escribe en `src/`, el Tester solo crea tests nuevos en `tests/` (sin `skip` ni `xfail`), y nadie modifica `AGENTS.md`, `pyproject.toml` ni el CI. Los permisos se validan sobre la ruta resuelta, así que `..` no sirve para salir del alcance.
+- **Permisos por rol:** el Implementer solo escribe código del proyecto que no sea test, el Tester solo crea tests nuevos (sin `skip`, `xfail`, `only` ni `todo`), y nadie modifica `AGENTS.md`, `pyproject.toml`, `prompt-maestro.toml`, el CI ni los archivos que el proyecto declare protegidos. Por defecto el código es `src/` y los tests `tests/`; `prompt-maestro.toml` lo cambia con globs. Los permisos se validan sobre la ruta resuelta, así que `..` no sirve para salir del alcance.
 - **Secretos:** se bloquea la lectura de `.env`, claves y certificados, y se escanea todo contenido antes de escribirlo.
 - **Comandos:** una lista de patrones prohibidos (borrados recursivos, `push --force`, red, instalación de dependencias) se verifica antes de ejecutar.
 - **Entorno:** los procesos hijos heredan solo variables de una allowlist, así que las API keys nunca llegan a los comandos de verificación.
@@ -45,5 +45,5 @@ La imagen del contenedor debe traer las herramientas de los gates y las dependen
 ## Extensibilidad
 
 - **Otro modelo:** implementá `LLMClient.complete(role, system, prompt)`.
-- **Otros checks:** pasá un mapa propio de `CheckSpec` a `SandboxGateRunner` (por ejemplo, `npm test` para un repo de TypeScript).
-- **Otra política:** `OrchestratorConfig` controla reintentos, prefijos de escritura y escalamiento de áreas sensibles.
+- **Otro stack:** declaralo en `prompt-maestro.toml` (`project.py`): stack y framework de tests para los prompts, globs de código y de tests, archivos protegidos, valores públicos que el detector de secretos debe ignorar y los checks de cada gate.
+- **Otra política:** `OrchestratorConfig` controla reintentos, escalamiento de áreas sensibles y el `ProjectProfile`.

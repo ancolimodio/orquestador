@@ -3,6 +3,8 @@
 ## [Sin publicar]
 
 ### Agregado
+- `prompt-maestro.toml`: el harness sirve para otros stacks. Declara stack y framework de tests (para los prompts), globs de código y de tests (los tests pueden vivir junto al código), archivos protegidos, valores públicos que el detector de secretos ignora y los checks de cada gate.
+- El detector de tests debilitados reconoce `skip`, `only`, `todo`, `xit` y `fit` de Jest/Vitest.
 - El mapa del repo que ven los agentes respeta `.gitignore` y ya no recorre `node_modules`.
 - `ContainerSandbox`: gates en contenedores efímeros sin red, con el repo en solo lectura (`--container-image`).
 - Guardrail contra tests debilitados (`skip`, `skipif`, `xfail`) y contra sobrescribir tests existentes.
@@ -10,6 +12,9 @@
 - Los clientes HTTP respetan `Retry-After` ante un 429, para planes con límites por minuto.
 - Cada corrida del CLI guarda `report.json`, `events.jsonl` y, si falla, `error.txt` en su propia carpeta (`.prompt-maestro/runs/`).
 - `EventLog.phase_durations()`: tiempo total por fase. Es la primera feature que escribieron los propios agentes del harness.
+
+### Cambiado
+- `OrchestratorConfig` reemplaza `code_prefixes`, `test_prefixes` y `rules_file` por `profile: ProjectProfile`, y `Workspace.write` recibe una `WritePolicy` en lugar de `allowed_prefixes`.
 
 ### Corregido
 - El Gate A rechazaba planes correctos que declaraban métodos nuevos: el plan ahora distingue `symbols` de `new_symbols`.

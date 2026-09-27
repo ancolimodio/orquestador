@@ -162,6 +162,33 @@ El CLI elige el proveedor con `--provider`, y cada uno lee su key de su propia v
 
 Ante un 429, el cliente respeta el `Retry-After` del proveedor (hasta 60 s) y, si no viene, usa backoff exponencial.
 
+## Otros stacks: `prompt-maestro.toml`
+
+Sin configuración, el harness asume un proyecto Python con `src/`, `tests/` y los gates `ruff`, `mypy`, `pytest` y `bandit`. Para otro stack, agregá `prompt-maestro.toml` en la raíz del repo de destino:
+
+```toml
+stack = "TypeScript + React (Create React App)"
+test_framework = "Jest + Testing Library"
+code = ["web/src/**/*.ts", "web/src/**/*.tsx"]
+tests = ["web/src/**/*.test.ts", "web/src/**/*.test.tsx"]
+protected = ["web/package.json", "web/package-lock.json"]
+secret_allowlist = ["<apiKey web pública de Firebase>"]
+
+[[gates.B]]
+name = "tsc"
+argv = ["node", "web/node_modules/typescript/bin/tsc", "--noEmit", "-p", "web"]
+
+[[gates.C]]
+name = "jest"
+argv = ["npm", "--prefix", "web", "test", "--", "--watchAll=false", "--passWithNoTests"]
+```
+
+- **Globs:** `*` no cruza `/`, `**` sí, y `dir/` equivale a `dir/**`. Un archivo que coincide con `tests` es un test aunque también coincida con `code`: los tests pueden vivir junto al código.
+- **Roles:** el Implementer escribe lo que coincide con `code` y no es test; el Tester, solo tests nuevos.
+- **Protección:** `protected` se suma a los archivos que el harness ya protege, entre ellos el propio `prompt-maestro.toml`. `secret_allowlist` lista valores **exactos** que el proyecto publica a propósito; cualquier otro secreto sigue deteniendo la tarea.
+- **Prompts:** los prompts de los agentes se arman con `stack`, `test_framework` y los globs; las reglas específicas van en el `AGENTS.md` del proyecto (o en el archivo que indique `rules_file`).
+- **Mapa del repo:** si el repo usa git, el mapa que ven los agentes respeta `.gitignore`.
+
 ## Decisiones de diseño
 
 - **Async-first.** Todo el I/O usa `asyncio`: concurrencia estructurada con `TaskGroup`, timeouts en cada llamada externa, `Semaphore` para respetar rate limits y `to_thread` para I/O de disco. Ninguna llamada bloquea el event loop.

@@ -96,7 +96,7 @@ def _happy_llm() -> _ClosableScriptedLLM:
 def _run_cli(repo: Path, monkeypatch: pytest.MonkeyPatch, llm: ScriptedLLM) -> int:
     monkeypatch.setenv("ANTHROPIC_API_KEY", "k")
     monkeypatch.setattr(cli, "build_llm", lambda *_, **__: llm)
-    monkeypatch.setattr(cli, "SandboxGateRunner", lambda _: FakeGateRunner())
+    monkeypatch.setattr(cli, "SandboxGateRunner", lambda *_: FakeGateRunner())
     args = cli.build_parser().parse_args(
         ["run", "Agregar subtract", "--repo", str(repo), "--container-image", "img"]
     )

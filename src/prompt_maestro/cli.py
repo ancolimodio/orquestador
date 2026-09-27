@@ -15,6 +15,7 @@ from prompt_maestro.llm import AnthropicLLM, HttpLLM, OpenAICompatibleLLM
 from prompt_maestro.models import TaskReport, TaskStatus
 from prompt_maestro.observability import EventLog
 from prompt_maestro.orchestrator import Orchestrator, OrchestratorConfig
+from prompt_maestro.project import ProjectConfigError, load_profile
 from prompt_maestro.sandbox import CommandRunner, ContainerSandbox, Sandbox
 from prompt_maestro.workspace import Workspace
 
@@ -132,6 +133,11 @@ async def _run(args: argparse.Namespace) -> int:
     if not model:
         print(f"El proveedor '{args.provider}' requiere --model.", file=sys.stderr)
         return 2
+    try:
+        profile = await asyncio.to_thread(load_profile, args.repo)
+    except ProjectConfigError as exc:
+        print(exc, file=sys.stderr)
+        return 2
     task_id = uuid.uuid4().hex[:8]
     run_dir = await asyncio.to_thread(new_run_dir, args.runs_dir or args.repo / RUNS_DIR, task_id)
     print(f"Corrida {task_id}: {run_dir}", file=sys.stderr)
@@ -140,9 +146,9 @@ async def _run(args: argparse.Namespace) -> int:
         orchestrator = Orchestrator(
             llm=llm,
             workspace=Workspace(args.repo),
-            gate_runner=SandboxGateRunner(build_runner(args)),
+            gate_runner=SandboxGateRunner(build_runner(args), profile.gate_specs()),
             events=EventLog(args.events or run_dir / "events.jsonl"),
-            config=OrchestratorConfig(max_attempts_per_gate=args.max_attempts),
+            config=OrchestratorConfig(max_attempts_per_gate=args.max_attempts, profile=profile),
         )
         report = await orchestrator.run(args.requirement, task_id=task_id)
     except Exception:

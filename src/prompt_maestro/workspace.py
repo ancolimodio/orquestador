@@ -7,7 +7,7 @@ from collections.abc import Iterable
 from pathlib import Path, PurePosixPath
 
 from prompt_maestro.errors import GuardrailViolationError
-from prompt_maestro.guardrails import ensure_no_secrets, ensure_path_writable, is_secret_file
+from prompt_maestro.guardrails import WritePolicy, is_secret_file
 from prompt_maestro.models import ChangeKind, Plan
 
 IGNORED_DIRS: frozenset[str] = frozenset(
@@ -54,12 +54,15 @@ class Workspace:
         except UnicodeDecodeError as exc:
             raise GuardrailViolationError(f"Archivo no es texto UTF-8: {rel_path}") from exc
 
-    async def write(self, rel_path: str, content: str, *, allowed_prefixes: Iterable[str]) -> None:
+    async def write(self, rel_path: str, content: str, *, policy: WritePolicy) -> None:
         path = self._resolve(rel_path)
-        ensure_path_writable(rel_path, allowed_prefixes)
-        # Segunda barrera: los permisos también se validan sobre la ruta ya resuelta.
-        ensure_path_writable(path.relative_to(self.root).as_posix(), allowed_prefixes)
-        ensure_no_secrets(content, where=rel_path)
+        # Los permisos se validan sobre la ruta pedida y, como segunda barrera, sobre la
+        # ruta ya resuelta (symlinks incluidos).
+        for candidate in (rel_path, path.relative_to(self.root).as_posix()):
+            reason = policy.scope.reason(policy.safe_path(candidate))
+            if reason:
+                raise GuardrailViolationError(reason)
+        policy.check_content(content, where=rel_path)
         await asyncio.to_thread(path.parent.mkdir, parents=True, exist_ok=True)
         await asyncio.to_thread(path.write_text, content, encoding="utf-8")
 

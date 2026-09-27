@@ -7,6 +7,7 @@ from pydantic import BaseModel, ValidationError
 
 from prompt_maestro.errors import HandoffValidationError
 from prompt_maestro.llm import LLMClient
+from prompt_maestro.project import ProjectProfile
 from prompt_maestro.prompts import build_system_prompt
 
 ModelT = TypeVar("ModelT", bound=BaseModel)
@@ -34,10 +35,15 @@ class Agent:
     role: ClassVar[str]
 
     def __init__(
-        self, llm: LLMClient, *, harness_rules: str = "", max_format_retries: int = 2
+        self,
+        llm: LLMClient,
+        *,
+        harness_rules: str = "",
+        profile: ProjectProfile | None = None,
+        max_format_retries: int = 2,
     ) -> None:
         self._llm = llm
-        self._system = build_system_prompt(self.role, harness_rules)
+        self._system = build_system_prompt(self.role, harness_rules, profile)
         self._max_format_retries = max_format_retries
 
     async def _ask(self, prompt: str, output_model: type[ModelT]) -> ModelT:

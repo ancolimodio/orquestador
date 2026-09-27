@@ -6,6 +6,8 @@ las verifica antes de ejecutar cualquier acción.
 
 import re
 from collections.abc import Iterable, Sequence
+from dataclasses import dataclass
+from functools import cache
 from pathlib import PurePosixPath
 
 from prompt_maestro.errors import GuardrailViolationError
@@ -33,7 +35,14 @@ SECRET_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ),
 )
 
-PROTECTED_PATHS: tuple[str, ...] = ("AGENTS.md", ".github/", ".gitlab-ci.yml", "pyproject.toml")
+# Globs (ver `matches_glob`); un proyecto puede sumar los suyos en `prompt-maestro.toml`.
+PROTECTED_PATHS: tuple[str, ...] = (
+    "AGENTS.md",
+    ".github/",
+    ".gitlab-ci.yml",
+    "pyproject.toml",
+    "prompt-maestro.toml",
+)
 
 SECRET_FILE_NAMES: frozenset[str] = frozenset({".env", ".netrc", "id_rsa", "id_ed25519"})
 SECRET_FILE_SUFFIXES: frozenset[str] = frozenset({".pem", ".key", ".p12", ".pfx"})
@@ -49,13 +58,19 @@ def check_command(argv: Sequence[str]) -> None:
             raise GuardrailViolationError(f"Comando prohibido ({label}): {command}")
 
 
-def find_secrets(text: str) -> list[str]:
-    """Devuelve los tipos de secreto detectados, sin exponer su valor."""
+def find_secrets(text: str, *, allow: Iterable[str] = ()) -> list[str]:
+    """Devuelve los tipos de secreto detectados, sin exponer su valor.
+
+    `allow` lista valores exactos que el proyecto declaró públicos (por ejemplo, la
+    `apiKey` web de Firebase, que va en el cliente por diseño): no cuentan como secreto.
+    """
+    for value in allow:
+        text = text.replace(value, "")
     return [label for label, pattern in SECRET_PATTERNS if pattern.search(text)]
 
 
-def ensure_no_secrets(text: str, *, where: str) -> None:
-    found = find_secrets(text)
+def ensure_no_secrets(text: str, *, where: str, allow: Iterable[str] = ()) -> None:
+    found = find_secrets(text, allow=allow)
     if found:
         raise GuardrailViolationError(
             f"Posible secreto en {where}: {', '.join(found)}. Se detiene la tarea."
@@ -71,7 +86,38 @@ def is_secret_file(path: str) -> bool:
     )
 
 
-def ensure_path_safe(path: str) -> str:
+@cache
+def _glob_regex(pattern: str, *, ignore_case: bool = False) -> re.Pattern[str]:
+    # Un patrón terminado en `/` es un directorio: equivale a `dir/**`.
+    if pattern.endswith("/"):
+        pattern += "**"
+    parts: list[str] = []
+    i = 0
+    while i < len(pattern):
+        if pattern.startswith("**/", i):
+            parts.append("(?:.*/)?")
+            i += 3
+        elif pattern.startswith("**", i):
+            parts.append(".*")
+            i += 2
+        elif pattern[i] == "*":
+            parts.append("[^/]*")
+            i += 1
+        elif pattern[i] == "?":
+            parts.append("[^/]")
+            i += 1
+        else:
+            parts.append(re.escape(pattern[i]))
+            i += 1
+    return re.compile("".join(parts) + r"\Z", re.IGNORECASE if ignore_case else 0)
+
+
+def matches_glob(path: str, pattern: str, *, ignore_case: bool = False) -> bool:
+    """Glob sobre rutas POSIX: `*` no cruza `/`, `**` sí y `dir/` equivale a `dir/**`."""
+    return _glob_regex(pattern, ignore_case=ignore_case).match(path) is not None
+
+
+def ensure_path_safe(path: str, *, protected: Iterable[str] = ()) -> str:
     """Rechaza rutas que ningún agente debería tocar y devuelve la ruta normalizada.
 
     La ruta debe ser relativa y sin `..`: los permisos se validan sobre la ruta real,
@@ -82,25 +128,57 @@ def ensure_path_safe(path: str) -> str:
     if candidate.is_absolute() or ".." in candidate.parts:
         raise GuardrailViolationError(f"Ruta no normalizada: {path}")
     normalized = candidate.as_posix()
-    folded = normalized.casefold()
-    if any(folded == p.casefold() or folded.startswith(p.casefold()) for p in PROTECTED_PATHS):
+    if any(matches_glob(normalized, p, ignore_case=True) for p in (*PROTECTED_PATHS, *protected)):
         raise GuardrailViolationError(f"Archivo protegido por el harness: {path}")
     if is_secret_file(normalized):
         raise GuardrailViolationError(f"Archivo de secretos: {path}")
     return normalized
 
 
-def out_of_scope(path: str, allowed_prefixes: Iterable[str]) -> str | None:
-    """Motivo si la ruta (ya normalizada) queda fuera de las carpetas del rol, o None."""
-    prefixes = tuple(allowed_prefixes)
-    if any(path.startswith(p) for p in prefixes):
-        return None
-    return f"Escritura fuera de alcance: {path} (permitido: {', '.join(prefixes)})"
+@dataclass(frozen=True, slots=True)
+class RoleScope:
+    """Qué archivos puede escribir un rol: los que coinciden con `allowed` y no con `excluded`.
+
+    El Implementer excluye los tests del proyecto, que pueden vivir junto al código
+    (`src/**/*.test.tsx`); el Tester solo escribe esos tests.
+    """
+
+    allowed: tuple[str, ...]
+    excluded: tuple[str, ...] = ()
+
+    def contains(self, path: str) -> bool:
+        return any(matches_glob(path, p) for p in self.allowed) and not any(
+            matches_glob(path, p) for p in self.excluded
+        )
+
+    def reason(self, path: str) -> str | None:
+        """Motivo si la ruta (ya normalizada) queda fuera del alcance del rol, o None."""
+        if self.contains(path):
+            return None
+        detail = f"permitido: {', '.join(self.allowed)}"
+        if self.excluded:
+            detail += f"; excepto: {', '.join(self.excluded)}"
+        return f"Escritura fuera de alcance: {path} ({detail})"
 
 
-def ensure_path_writable(path: str, allowed_prefixes: Iterable[str]) -> None:
-    """Un agente solo escribe dentro de sus carpetas y nunca en archivos protegidos."""
-    reason = out_of_scope(ensure_path_safe(path), allowed_prefixes)
+@dataclass(frozen=True, slots=True)
+class WritePolicy:
+    """Todo lo que se valida antes de que un rol escriba un archivo."""
+
+    scope: RoleScope
+    protected: tuple[str, ...] = ()
+    secret_allowlist: tuple[str, ...] = ()
+
+    def safe_path(self, path: str) -> str:
+        return ensure_path_safe(path, protected=self.protected)
+
+    def check_content(self, content: str, *, where: str) -> None:
+        ensure_no_secrets(content, where=where, allow=self.secret_allowlist)
+
+
+def ensure_path_writable(path: str, allowed: Iterable[str]) -> None:
+    """Un agente solo escribe dentro de su alcance y nunca en archivos protegidos."""
+    reason = RoleScope(tuple(allowed)).reason(ensure_path_safe(path))
     if reason:
         raise GuardrailViolationError(reason)
 
@@ -109,6 +187,9 @@ TEST_WEAKENING_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("pytest skip/xfail", re.compile(r"\bpytest\.(mark\.)?(skip|skipif|xfail)\b")),
     ("unittest skip", re.compile(r"\bunittest\.(skip|skipIf|skipUnless|expectedFailure)\b")),
     ("unittest skip", re.compile(r"\.skipTest\(")),
+    ("jest/vitest skip", re.compile(r"\b(?:it|test|describe)\.(?:skip|todo)\b")),
+    ("jest/vitest skip", re.compile(r"\bx(?:it|test|describe)\(")),
+    ("jest/vitest only", re.compile(r"\b(?:it|test|describe)\.only\b|\bf(?:it|describe)\(")),
 )
 
 
