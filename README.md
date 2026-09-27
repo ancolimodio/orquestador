@@ -45,7 +45,7 @@ flowchart LR
     GC -- pasa --> RV[Reviewer]
     RV -->|review.json| GD{Gate D<br/>bandit + review}
     GD -- cambios --> I
-    GD -- aprueba --> PR[PR para revisión humana]
+    GD -- aprueba --> PR[Cambio verificado para revisión humana]
     GA & GB & GC & GD -. presupuesto agotado .-> H[Escalamiento a humano]
 ```
 
@@ -113,6 +113,8 @@ PM_TEST_CONTAINER_IMAGE=prompt-maestro-gates pytest tests/test_container_integra
 
 La salida es un `TaskReport` en JSON con el plan, la revisión, los archivos cambiados, los intentos por gate y, si corresponde, el motivo del escalamiento.
 
+Los cambios se escriben directamente en el working tree, sin commits: corré el harness sobre una rama limpia, revisá el diff y abrí el PR vos. Si la tarea escala, los archivos que alcanzó a escribir quedan como están.
+
 ## Uso como librería
 
 ```python
@@ -163,7 +165,7 @@ pytest --cov=prompt_maestro --cov-fail-under=80
 bandit -q -r src
 ```
 
-70 tests, cobertura mayor al 95%, `mypy --strict` sin errores y `bandit` limpio. El CI corre todo en cada push.
+112 tests (5 de integración con contenedores, opt-in), cobertura mayor al 95%, `mypy --strict` sin errores y `bandit` limpio. El CI corre todo en cada push.
 
 ## Estructura
 
@@ -182,7 +184,7 @@ prompt-maestro/
 │   ├── prompts.py          # System prompts por rol
 │   ├── observability.py    # Eventos JSONL y métricas
 │   └── cli.py
-├── tests/                  # 70 tests, sin llamadas a red
+├── tests/                  # 112 tests sin red; los de contenedores son opt-in
 ├── examples/demo.py        # Demo end-to-end sin API key
 └── docs/                   # Arquitectura y convenciones
 ```

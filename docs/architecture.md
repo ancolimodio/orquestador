@@ -25,6 +25,7 @@ Prompt Maestro separa **quién decide** (los agentes, apoyados en un modelo) de 
 5. **Tester → Gate C.** Un agente distinto escribe los tests en `tests/` y corre `pytest`. Separar autor y tester evita que el mismo agente "acomode" los tests a su propio código.
 6. **Reviewer → Gate D.** `bandit` corre primero y su resultado se le pasa al Reviewer, que revisa el diff contra el plan. La tarea se aprueba solo si ambos pasan y no hay hallazgos `blocker` o `major`.
 7. Cualquier falla en B, C o D vuelve al Implementer con el feedback completo; las fallas de C y D también le llegan al Tester, porque el error puede estar en el test. Cada gate tiene un presupuesto de 3 fallos propios; al agotarse, la tarea se escala con el historial.
+8. Los cambios se escriben en el working tree del repo, sin commits ni PR. Si la tarea escala, los archivos ya escritos quedan como están (`TaskReport.changed_files` los lista): corré el harness sobre una rama limpia.
 
 ## Modelo de seguridad
 

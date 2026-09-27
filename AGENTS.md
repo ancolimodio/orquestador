@@ -107,10 +107,12 @@ El harness no confía en la salida del modelo: la verifica. Los comandos viven e
 
 | Gate | Comando | Criterio de aprobación |
 |---|---|---|
-| B | `ruff check . && ruff format --check .` | Sin errores |
+| B | `ruff check .` + `ruff format --check .` | Sin errores |
 | B | `mypy --strict src` | Sin errores |
-| C | `pytest -q --cov=prompt_maestro --cov-fail-under=80` | Todos pasan, cobertura ≥ 80% |
-| D | `bandit -r src/` + checklist de revisión | Sin hallazgos altos o medios |
+| C | `pytest -q` | Todos pasan |
+| D | `bandit -q -r src` + checklist de revisión | Sin hallazgos de `bandit` ni hallazgos `blocker`/`major` del Reviewer |
+
+Los checks de un mismo gate corren en paralelo. La cobertura mínima del 80% de este repositorio la exige el CI (`pytest --cov=prompt_maestro --cov-fail-under=80`), no los gates: los gates son genéricos para cualquier repo de trabajo.
 
 Cuando un check falla, el agente recibe la salida completa del comando, no un resumen, y corrige la causa raíz. Parchear el síntoma (por ejemplo, un `# type: ignore` sin justificación) es un hallazgo bloqueante en el Gate D.
 
