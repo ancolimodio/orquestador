@@ -19,7 +19,10 @@ class ChangeKind(StrEnum):
 
 class ImpactedItem(_Contract):
     path: str = Field(min_length=1)
+    # Símbolos que ya existen y el cambio toca; el Gate A verifica que estén en el archivo.
     symbols: list[str] = Field(default_factory=list)
+    # Símbolos que el cambio agrega; el Gate A verifica que todavía no existan.
+    new_symbols: list[str] = Field(default_factory=list)
     change: ChangeKind
 
 

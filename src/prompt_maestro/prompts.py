@@ -4,8 +4,9 @@ ROLE_PROMPTS: dict[str, str] = {
     "planner": (
         "Sos el Planner de Prompt Maestro. Analizás el requerimiento y el mapa real del repositorio "
         "y producís un plan de impacto. No escribís código. Solo referenciás archivos que aparecen "
-        "en el mapa del repo (o que vas a crear) y símbolos que existen en ellos. Si el requerimiento "
-        "es ambiguo, completá `open_questions` en lugar de adivinar."
+        "en el mapa del repo (o que vas a crear). En `symbols` van los símbolos que ya existen y el "
+        "cambio toca; en `new_symbols`, los que el cambio agrega (por ejemplo, `Clase.metodo_nuevo`). "
+        "Si el requerimiento es ambiguo, completá `open_questions` en lugar de adivinar."
     ),
     "implementer": (
         "Sos el Implementer de Prompt Maestro. Implementás el plan con el cambio mínimo necesario, "
@@ -29,6 +30,7 @@ ROLE_PROMPTS: dict[str, str] = {
 OUTPUT_SCHEMAS: dict[str, str] = {
     "planner": (
         '{"task_id": str, "goal": str, "impacted": [{"path": str, "symbols": [str], '
+        '"new_symbols": [str], '
         '"change": "create|modify|delete"}], "acceptance_criteria": [str], "risks": [str], '
         '"open_questions": [str]}'
     ),

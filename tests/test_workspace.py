@@ -101,3 +101,42 @@ async def test_non_utf8_file_is_a_domain_error(repo: Path) -> None:
     (repo / "src" / "blob.py").write_bytes(b"\xff\xfe\x00binary")
     with pytest.raises(GuardrailViolationError, match="UTF-8"):
         await Workspace(repo).read("src/blob.py")
+
+
+async def test_validate_plan_accepts_new_symbols_in_existing_files(repo: Path) -> None:
+    """Regresión de una corrida real: el Planner no tenía cómo declarar un método nuevo."""
+    plan = _plan(
+        ImpactedItem(
+            path="src/app/calc.py",
+            symbols=["add"],
+            new_symbols=["subtract"],
+            change=ChangeKind.MODIFY,
+        )
+    )
+    assert await Workspace(repo).validate_plan(plan) == []
+
+
+async def test_validate_plan_rejects_new_symbols_that_already_exist(repo: Path) -> None:
+    plan = _plan(
+        ImpactedItem(path="src/app/calc.py", new_symbols=["add"], change=ChangeKind.MODIFY)
+    )
+    errors = await Workspace(repo).validate_plan(plan)
+    assert len(errors) == 1 and "ya existe" in errors[0]
+
+
+async def test_validate_plan_requires_the_owner_of_a_new_symbol(repo: Path) -> None:
+    plan = _plan(
+        ImpactedItem(
+            path="src/app/calc.py", new_symbols=["Calculator.subtract"], change=ChangeKind.MODIFY
+        )
+    )
+    errors = await Workspace(repo).validate_plan(plan)
+    assert len(errors) == 1 and "'Calculator'" in errors[0]
+
+
+async def test_missing_symbol_error_points_to_new_symbols(repo: Path) -> None:
+    plan = _plan(
+        ImpactedItem(path="src/app/calc.py", symbols=["subtract"], change=ChangeKind.MODIFY)
+    )
+    errors = await Workspace(repo).validate_plan(plan)
+    assert "new_symbols" in errors[0]

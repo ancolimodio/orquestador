@@ -109,9 +109,30 @@ class Workspace:
                 errors.append(f"{item.path}: no existe en el repositorio.")
                 continue
             content = await self.read(item.path)
-            for symbol in item.symbols:
-                name = symbol.rsplit(".", 1)[-1]
-                # Identificador completo: `add` no se valida con `address` ni `padding`.
-                if not re.search(rf"(?<!\w){re.escape(name)}(?!\w)", content):
-                    errors.append(f"{item.path}: el símbolo '{symbol}' no aparece en el archivo.")
+            errors.extend(_symbol_errors(item.path, content, item.symbols, item.new_symbols))
         return errors
+
+
+def _has_identifier(content: str, name: str) -> bool:
+    # Identificador completo: `add` no se valida con `address` ni `padding`.
+    return re.search(rf"(?<!\w){re.escape(name)}(?!\w)", content) is not None
+
+
+def _symbol_errors(
+    path: str, content: str, symbols: Iterable[str], new_symbols: Iterable[str]
+) -> list[str]:
+    errors: list[str] = []
+    for symbol in symbols:
+        if not _has_identifier(content, symbol.rsplit(".", 1)[-1]):
+            errors.append(
+                f"{path}: el símbolo '{symbol}' no aparece en el archivo. "
+                "Si el cambio lo agrega, declaralo en `new_symbols`."
+            )
+    for symbol in new_symbols:
+        owner, _, name = symbol.rpartition(".")
+        if _has_identifier(content, name):
+            errors.append(f"{path}: el símbolo nuevo '{symbol}' ya existe; declaralo en `symbols`.")
+        # `EventLog.phase_durations`: el método es nuevo, pero la clase tiene que existir.
+        if owner and not _has_identifier(content, owner.rsplit(".", 1)[-1]):
+            errors.append(f"{path}: '{owner}', dueño de '{symbol}', no aparece en el archivo.")
+    return errors

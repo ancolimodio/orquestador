@@ -19,7 +19,7 @@ Prompt Maestro separa **quién decide** (los agentes, apoyados en un modelo) de 
 ## Flujo de una tarea
 
 1. El Orchestrator carga `AGENTS.md` y lo inyecta en el system prompt de los cuatro agentes.
-2. **Planner → Gate A.** El plan se valida contra el repo: los archivos a modificar existen, los que se crean no existen y los símbolos aparecen en el código. Si falla, el Planner recibe la lista exacta de errores.
+2. **Planner → Gate A.** El plan se valida contra el repo: los archivos a modificar existen, los que se crean no existen, los `symbols` aparecen en el código y los `new_symbols` todavía no (pero su clase dueña sí). Si falla, el Planner recibe la lista exacta de errores.
 3. **Reglas de escalamiento.** Antes de escribir una línea, el harness escala si hay preguntas abiertas, borrados de archivos o áreas sensibles (auth, pagos, credenciales, datos personales).
 4. **Implementer → Gate B.** El código se escribe solo en `src/`, pasando por los guardrails. Luego corren `ruff` y `mypy --strict` en paralelo.
 5. **Tester → Gate C.** Un agente distinto escribe los tests en `tests/` y corre `pytest`. Separar autor y tester evita que el mismo agente "acomode" los tests a su propio código.

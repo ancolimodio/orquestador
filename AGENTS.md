@@ -40,7 +40,7 @@ Cada agente trabaja solo con el contexto de su handoff. Si necesita más informa
 Requerimiento
    │
    ▼
-[1] PLAN ──────── Gate A: el plan referencia archivos y símbolos que existen
+[1] PLAN ──────── Gate A: el plan referencia archivos y símbolos reales
    │
    ▼
 [2] IMPLEMENT ─── Gate B: lint + tipos pasan
@@ -144,13 +144,16 @@ Los agentes se comunican con JSON validado por Pydantic. Un handoff inválido se
   "task_id": "string",
   "goal": "Qué comportamiento cambia, en una oración",
   "impacted": [
-    { "path": "src/prompt_maestro/orchestrator.py", "symbols": ["Orchestrator.run"], "change": "modify" }
+    { "path": "src/prompt_maestro/orchestrator.py", "symbols": ["Orchestrator.run"], "new_symbols": ["Orchestrator.resume"], "change": "modify" }
   ],
   "acceptance_criteria": ["Criterio verificable 1", "Criterio verificable 2"],
   "risks": ["Riesgo y mitigación"],
   "open_questions": []
 }
 ```
+
+- `symbols`: símbolos que ya existen y el cambio toca. El Gate A verifica que aparezcan en el archivo.
+- `new_symbols`: símbolos que el cambio agrega. El Gate A verifica que todavía no existan y que exista su dueño (en `Orchestrator.resume`, la clase `Orchestrator`).
 
 Si `open_questions` no está vacío, el Orchestrator escala antes de implementar.
 
