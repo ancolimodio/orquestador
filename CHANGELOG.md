@@ -3,6 +3,7 @@
 ## [Sin publicar]
 
 ### Agregado
+- El mapa del repo que ven los agentes respeta `.gitignore` y ya no recorre `node_modules`.
 - `ContainerSandbox`: gates en contenedores efímeros sin red, con el repo en solo lectura (`--container-image`).
 - Guardrail contra tests debilitados (`skip`, `skipif`, `xfail`) y contra sobrescribir tests existentes.
 - `OpenAICompatibleLLM` y `--provider anthropic|gemini|openai` en el CLI: Gemini, OpenAI u Ollama además de Anthropic.

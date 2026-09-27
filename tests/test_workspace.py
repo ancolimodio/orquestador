@@ -1,3 +1,4 @@
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -140,3 +141,18 @@ async def test_missing_symbol_error_points_to_new_symbols(repo: Path) -> None:
     )
     errors = await Workspace(repo).validate_plan(plan)
     assert "new_symbols" in errors[0]
+
+
+async def test_repo_map_respects_gitignore(tmp_path: Path) -> None:
+    def git(*args: str) -> None:
+        subprocess.run(["git", *args], cwd=tmp_path, check=True, capture_output=True)  # noqa: S603, S607
+
+    git("init", "-q")
+    (tmp_path / ".gitignore").write_text("build/\n*.log\n", encoding="utf-8")
+    (tmp_path / "build").mkdir()
+    (tmp_path / "build" / "bundle.js").write_text("x", encoding="utf-8")
+    (tmp_path / "debug.log").write_text("x", encoding="utf-8")
+    (tmp_path / "app.ts").write_text("x", encoding="utf-8")
+    files = await Workspace(tmp_path).repo_map()
+    assert "app.ts" in files and ".gitignore" in files
+    assert "build/bundle.js" not in files and "debug.log" not in files

@@ -1,9 +1,10 @@
 """Acceso confinado al repositorio de trabajo."""
 
 import asyncio
+import os
 import re
 from collections.abc import Iterable
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from prompt_maestro.errors import GuardrailViolationError
 from prompt_maestro.guardrails import ensure_no_secrets, ensure_path_writable, is_secret_file
@@ -77,21 +78,54 @@ class Workspace:
             raise group.exceptions[0] from group
         return {p: task.result() for p, task in reads.items()}
 
-    def _walk(self, max_entries: int) -> list[str]:
+    def _walk(self) -> list[str]:
         files: list[str] = []
-        for path in sorted(self.root.rglob("*")):
-            rel = path.relative_to(self.root)
-            if any(part in IGNORED_DIRS for part in rel.parts) or not path.is_file():
-                continue
-            if is_secret_file(path.name):
-                continue
-            files.append(rel.as_posix())
-            if len(files) >= max_entries:
-                break
+        for dirpath, dirnames, filenames in os.walk(self.root):
+            # Poda en el lugar: no se recorre node_modules ni los caches.
+            dirnames[:] = [d for d in dirnames if d not in IGNORED_DIRS]
+            base = Path(dirpath).relative_to(self.root)
+            files.extend((base / name).as_posix() for name in filenames)
         return files
 
+    async def _git_files(self) -> list[str] | None:
+        """Archivos versionados o nuevos que no ignora `.gitignore`; None si no hay git."""
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "git",
+                "-C",
+                str(self.root),
+                "ls-files",
+                "-z",
+                "--cached",
+                "--others",
+                "--exclude-standard",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+            async with asyncio.timeout(30):
+                stdout, _ = await proc.communicate()
+        except (OSError, TimeoutError):
+            return None
+        if proc.returncode != 0:
+            return None
+        return [p for p in stdout.decode("utf-8", errors="replace").split("\0") if p]
+
+    def _keep(self, rel: str) -> bool:
+        path = PurePosixPath(rel)
+        return (
+            not any(part in IGNORED_DIRS for part in path.parts)
+            and not is_secret_file(path.name)
+            # Un gitlink (repo anidado) aparece como una entrada, pero no es un archivo.
+            and (self.root / rel).is_file()
+        )
+
     async def repo_map(self, *, max_entries: int = 500) -> list[str]:
-        return await asyncio.to_thread(self._walk, max_entries)
+        """Archivos del repo que ven los agentes: respeta `.gitignore` si el repo usa git."""
+        candidates = await self._git_files()
+        if candidates is None:
+            candidates = await asyncio.to_thread(self._walk)
+        kept = await asyncio.to_thread(lambda: sorted(p for p in candidates if self._keep(p)))
+        return kept[:max_entries]
 
     async def validate_plan(self, plan: Plan) -> list[str]:
         """Gate A: el plan debe apoyarse en archivos y símbolos reales."""
