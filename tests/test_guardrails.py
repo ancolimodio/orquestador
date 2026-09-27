@@ -5,9 +5,11 @@ from prompt_maestro.guardrails import (
     check_command,
     ensure_no_secrets,
     ensure_no_test_weakening,
+    ensure_path_safe,
     ensure_path_writable,
     find_secrets,
     is_secret_file,
+    out_of_scope,
     sensitive_areas,
 )
 
@@ -134,3 +136,9 @@ def test_regular_test_is_not_weakening() -> None:
 )
 def test_sensitive_areas_match_whole_words(text: str, expected: list[str]) -> None:
     assert sensitive_areas([text]) == expected
+
+
+def test_safe_path_is_normalized_and_scope_is_a_reason_not_an_error() -> None:
+    assert ensure_path_safe(r"src\app\calc.py") == "src/app/calc.py"
+    assert out_of_scope("src/app/calc.py", ["src/"]) is None
+    assert "fuera de alcance" in (out_of_scope("tests/test_x.py", ["src/"]) or "")

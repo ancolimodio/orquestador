@@ -8,6 +8,7 @@
 
 ### Corregido
 - El Gate A rechazaba planes correctos que declaraban métodos nuevos: el plan ahora distingue `symbols` de `new_symbols`.
+- Un agente que escribía fuera de su carpeta mataba la tarea y dejaba archivos a medio escribir: el ChangeSet se valida completo antes de escribir y el error de alcance vuelve como feedback.
 - Los permisos de escritura se podían saltear con `..` (por ejemplo, `src/../AGENTS.md`).
 - El presupuesto de reintentos contaba vueltas del loop en lugar de fallos, y escalaba culpando al gate equivocado.
 - El Tester recibía errores de lint como si fueran fallas de tests.

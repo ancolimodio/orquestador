@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 from prompt_maestro.llm import ScriptedLLM
@@ -251,3 +252,62 @@ async def test_skipped_tests_are_rejected(repo: Path) -> None:
     assert report.status is TaskStatus.ESCALATED
     assert "debilitado" in (report.escalation_reason or "")
     assert not (repo / "tests" / "test_subtract.py").exists()
+
+
+def _multi_changes(*files: tuple[str, str]) -> str:
+    return json.dumps({"changes": [{"path": p, "content": c} for p, c in files], "notes": ""})
+
+
+async def test_implementer_out_of_scope_gets_feedback_and_writes_nothing(repo: Path) -> None:
+    """Regresión de una corrida real: el Implementer escribió el test que listaba el plan."""
+    out_of_scope = _multi_changes(
+        ("src/app/extra.py", "VALUE = 1\n"),
+        ("tests/test_extra.py", "def test_extra() -> None:\n    assert True\n"),
+    )
+    llm = ScriptedLLM(
+        {
+            "planner": [plan_json()],
+            "implementer": [out_of_scope, IMPL],
+            "tester": [TESTS],
+            "reviewer": [review_json()],
+        }
+    )
+    report = await _orchestrator(repo, llm, FakeGateRunner()).run("r")
+    assert report.status is TaskStatus.DONE
+    assert report.attempts["B"] == 2
+    assert not (repo / "src" / "app" / "extra.py").exists()
+    second_impl = [p for role, p in llm.calls if role == "implementer"][1]
+    assert "fuera de alcance: tests/test_extra.py" in second_impl
+
+
+async def test_tester_out_of_scope_gets_feedback(repo: Path) -> None:
+    hack = changes_json("src/app/hack.py", "HACK = True\n")
+    llm = ScriptedLLM(
+        {
+            "planner": [plan_json()],
+            "implementer": [IMPL],
+            "tester": [hack, TESTS],
+            "reviewer": [review_json()],
+        }
+    )
+    report = await _orchestrator(repo, llm, FakeGateRunner()).run("r")
+    assert report.status is TaskStatus.DONE
+    assert report.attempts["C"] == 2
+    assert not (repo / "src" / "app" / "hack.py").exists()
+
+
+async def test_repeated_scope_errors_exhaust_the_gate_budget(repo: Path) -> None:
+    wrong = changes_json("docs/notes.md", "# notas\n")
+    llm = ScriptedLLM({"planner": [plan_json()], "implementer": [wrong] * 3})
+    report = await _orchestrator(repo, llm, FakeGateRunner()).run("r")
+    assert report.status is TaskStatus.ESCALATED
+    assert (report.escalation_reason or "").startswith("Gate B")
+
+
+async def test_suspicious_change_escalates_before_writing_any_file(repo: Path) -> None:
+    mixed = _multi_changes(("src/app/new.py", "VALUE = 1\n"), ("AGENTS.md", "# Sin reglas\n"))
+    llm = ScriptedLLM({"planner": [plan_json()], "implementer": [mixed]})
+    report = await _orchestrator(repo, llm, FakeGateRunner()).run("r")
+    assert report.status is TaskStatus.ESCALATED
+    assert "protegido" in (report.escalation_reason or "")
+    assert not (repo / "src" / "app" / "new.py").exists()

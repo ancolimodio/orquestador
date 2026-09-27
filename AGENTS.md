@@ -154,6 +154,7 @@ Los agentes se comunican con JSON validado por Pydantic. Un handoff inválido se
 
 - `symbols`: símbolos que ya existen y el cambio toca. El Gate A verifica que aparezcan en el archivo.
 - `new_symbols`: símbolos que el cambio agrega. El Gate A verifica que todavía no existan y que exista su dueño (en `Orchestrator.resume`, la clase `Orchestrator`).
+- El plan puede listar archivos de `src/` y de `tests/`, pero cada agente escribe solo los de su carpeta: los tests los escribe el Tester.
 
 Si `open_questions` no está vacío, el Orchestrator escala antes de implementar.
 

@@ -71,11 +71,12 @@ def is_secret_file(path: str) -> bool:
     )
 
 
-def ensure_path_writable(path: str, allowed_prefixes: Iterable[str]) -> None:
-    """Un agente solo escribe dentro de sus carpetas y nunca en archivos protegidos.
+def ensure_path_safe(path: str) -> str:
+    """Rechaza rutas que ningún agente debería tocar y devuelve la ruta normalizada.
 
     La ruta debe ser relativa y sin `..`: los permisos se validan sobre la ruta real,
-    no sobre un string que después se resuelve a otro lugar.
+    no sobre un string que después se resuelve a otro lugar. Estas violaciones son
+    sospechosas (posible manipulación del modelo), así que detienen la tarea.
     """
     candidate = PurePosixPath(path.replace("\\", "/"))
     if candidate.is_absolute() or ".." in candidate.parts:
@@ -86,11 +87,22 @@ def ensure_path_writable(path: str, allowed_prefixes: Iterable[str]) -> None:
         raise GuardrailViolationError(f"Archivo protegido por el harness: {path}")
     if is_secret_file(normalized):
         raise GuardrailViolationError(f"Archivo de secretos: {path}")
+    return normalized
+
+
+def out_of_scope(path: str, allowed_prefixes: Iterable[str]) -> str | None:
+    """Motivo si la ruta (ya normalizada) queda fuera de las carpetas del rol, o None."""
     prefixes = tuple(allowed_prefixes)
-    if not any(normalized.startswith(p) for p in prefixes):
-        raise GuardrailViolationError(
-            f"Escritura fuera de alcance: {path} (permitido: {', '.join(prefixes)})"
-        )
+    if any(path.startswith(p) for p in prefixes):
+        return None
+    return f"Escritura fuera de alcance: {path} (permitido: {', '.join(prefixes)})"
+
+
+def ensure_path_writable(path: str, allowed_prefixes: Iterable[str]) -> None:
+    """Un agente solo escribe dentro de sus carpetas y nunca en archivos protegidos."""
+    reason = out_of_scope(ensure_path_safe(path), allowed_prefixes)
+    if reason:
+        raise GuardrailViolationError(reason)
 
 
 TEST_WEAKENING_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (

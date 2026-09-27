@@ -2,8 +2,9 @@
 
 import time
 import uuid
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from pathlib import PurePosixPath
+from functools import partial
 
 from prompt_maestro.agents import Implementer, Planner, Reviewer, Tester
 from prompt_maestro.errors import (
@@ -13,7 +14,13 @@ from prompt_maestro.errors import (
     LLMError,
 )
 from prompt_maestro.gates import GateRunner
-from prompt_maestro.guardrails import ensure_no_test_weakening, sensitive_areas
+from prompt_maestro.guardrails import (
+    ensure_no_secrets,
+    ensure_no_test_weakening,
+    ensure_path_safe,
+    out_of_scope,
+    sensitive_areas,
+)
 from prompt_maestro.llm import LLMClient
 from prompt_maestro.models import (
     ChangeKind,
@@ -153,8 +160,13 @@ class Orchestrator:
         test_feedback = ""
         while True:
             files = await self._ws.read_many(i.path for i in plan.impacted)
-            implementation = await team.implementer.run(
-                plan=plan, files=files, feedback=impl_feedback
+            implementation = await self._request_changes(
+                state,
+                gate="B",
+                agent="implementer",
+                prefixes=self.config.code_prefixes,
+                ask=partial(team.implementer.run, plan=plan, files=files),
+                feedback=impl_feedback,
             )
             await self._apply(state, implementation, self.config.code_prefixes)
             gate_b = await self._run_gate(state, "B", "implementer")
@@ -162,13 +174,20 @@ class Orchestrator:
                 impl_feedback = gate_b.failure_report()
                 continue
 
-            tests = await team.tester.run(
-                plan=plan,
-                implementation=implementation,
-                existing_tests=await self._existing_tests(),
+            tests = await self._request_changes(
+                state,
+                gate="C",
+                agent="tester",
+                prefixes=self.config.test_prefixes,
+                ask=partial(
+                    team.tester.run,
+                    plan=plan,
+                    implementation=implementation,
+                    existing_tests=await self._existing_tests(),
+                ),
                 feedback=test_feedback,
             )
-            await self._apply_tests(state, tests)
+            await self._apply(state, tests, self.config.test_prefixes)
             gate_c = await self._run_gate(state, "C", "tester")
             if not gate_c.passed:
                 # La falla puede estar en el código o en el test: la ven los dos agentes.
@@ -217,16 +236,55 @@ class Orchestrator:
             await self._ws.write(change.path, change.content, allowed_prefixes=prefixes)
             state.changed_files.add(change.path)
 
-    async def _apply_tests(self, state: _TaskState, tests: ChangeSet) -> None:
-        """El Tester agrega tests; no reescribe ni debilita los que ya protegían el repo."""
-        for change in tests.changes:
-            key = PurePosixPath(change.path.replace("\\", "/")).as_posix().casefold()
-            if key in state.preexisting_tests:
-                raise GuardrailViolationError(
-                    f"El Tester no puede modificar un test existente: {change.path}"
-                )
-            ensure_no_test_weakening(change.content, where=change.path)
-        await self._apply(state, tests, self.config.test_prefixes)
+    async def _request_changes(
+        self,
+        state: _TaskState,
+        *,
+        gate: str,
+        agent: str,
+        prefixes: tuple[str, ...],
+        ask: Callable[..., Awaitable[ChangeSet]],
+        feedback: str,
+    ) -> ChangeSet:
+        """Pide cambios al agente hasta que todos queden dentro de su alcance.
+
+        Nada se escribe hasta validar el ChangeSet completo. Salirse de la carpeta del rol
+        es un error honesto (el plan también lista archivos de otros roles): vuelve como
+        feedback y consume el presupuesto del gate. Lo sospechoso (archivos protegidos,
+        secretos, `..`, tests debilitados) sigue deteniendo la tarea.
+        """
+        while True:
+            changes = await ask(feedback=feedback)
+            problems = self._validate_changes(state, changes, prefixes, is_tests=gate == "C")
+            if not problems:
+                return changes
+            attempt = self._next_attempt(state, gate)
+            feedback = "Cambios rechazados antes de escribir:\n" + "\n".join(problems)
+            await self._emit(
+                state, agent, gate, "gate", "fail", attempt=attempt, detail=feedback[:200]
+            )
+            self._record_failure(state, gate, attempt, feedback)
+
+    @staticmethod
+    def _validate_changes(
+        state: _TaskState, changes: ChangeSet, prefixes: tuple[str, ...], *, is_tests: bool
+    ) -> list[str]:
+        """Escala ante lo sospechoso y devuelve los problemas de alcance recuperables."""
+        problems: list[str] = []
+        for change in changes.changes:
+            path = ensure_path_safe(change.path)
+            ensure_no_secrets(change.content, where=change.path)
+            if is_tests:
+                # El Tester agrega tests; no reescribe ni debilita los que protegían el repo.
+                if path.casefold() in state.preexisting_tests:
+                    raise GuardrailViolationError(
+                        f"El Tester no puede modificar un test existente: {change.path}"
+                    )
+                ensure_no_test_weakening(change.content, where=change.path)
+            reason = out_of_scope(path, prefixes)
+            if reason:
+                problems.append(reason)
+        return problems
 
     async def _preexisting_tests(self) -> frozenset[str]:
         if self.config.allow_modifying_existing_tests:
