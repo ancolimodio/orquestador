@@ -93,6 +93,22 @@ def ensure_path_writable(path: str, allowed_prefixes: Iterable[str]) -> None:
         )
 
 
+TEST_WEAKENING_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
+    ("pytest skip/xfail", re.compile(r"\bpytest\.(mark\.)?(skip|skipif|xfail)\b")),
+    ("unittest skip", re.compile(r"\bunittest\.(skip|skipIf|skipUnless|expectedFailure)\b")),
+    ("unittest skip", re.compile(r"\.skipTest\(")),
+)
+
+
+def ensure_no_test_weakening(text: str, *, where: str) -> None:
+    """Un test no se saltea ni se marca como falla esperada para que un gate pase."""
+    found = sorted({label for label, pattern in TEST_WEAKENING_PATTERNS if pattern.search(text)})
+    if found:
+        raise GuardrailViolationError(
+            f"Test debilitado en {where}: {', '.join(found)}. Se detiene la tarea."
+        )
+
+
 SENSITIVE_KEYWORDS: tuple[str, ...] = (
     "auth",
     "login",

@@ -4,6 +4,7 @@ from prompt_maestro.errors import GuardrailViolationError
 from prompt_maestro.guardrails import (
     check_command,
     ensure_no_secrets,
+    ensure_no_test_weakening,
     ensure_path_writable,
     find_secrets,
     is_secret_file,
@@ -98,3 +99,25 @@ def test_sensitive_areas() -> None:
         "pago",
     ]
     assert sensitive_areas(["src/app/calc.py", "Agregar subtract"]) == []
+
+
+@pytest.mark.parametrize(
+    "code",
+    [
+        "@pytest.mark.skip(reason='x')",
+        "@pytest.mark.skipif(True, reason='x')",
+        "@pytest.mark.xfail",
+        "pytest.skip('x')",
+        "@unittest.skip('x')",
+        "self.skipTest('x')",
+    ],
+)
+def test_test_weakening_is_blocked(code: str) -> None:
+    with pytest.raises(GuardrailViolationError):
+        ensure_no_test_weakening(code, where="tests/test_x.py")
+
+
+def test_regular_test_is_not_weakening() -> None:
+    ensure_no_test_weakening(
+        "def test_skip_list() -> None:\n    assert skip_list([]) == []\n", where="t"
+    )

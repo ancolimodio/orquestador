@@ -3,6 +3,7 @@
 import time
 import uuid
 from dataclasses import dataclass, field
+from pathlib import PurePosixPath
 
 from prompt_maestro.agents import Implementer, Planner, Reviewer, Tester
 from prompt_maestro.errors import (
@@ -12,7 +13,7 @@ from prompt_maestro.errors import (
     LLMError,
 )
 from prompt_maestro.gates import GateRunner
-from prompt_maestro.guardrails import sensitive_areas
+from prompt_maestro.guardrails import ensure_no_test_weakening, sensitive_areas
 from prompt_maestro.llm import LLMClient
 from prompt_maestro.models import (
     ChangeKind,
@@ -35,6 +36,7 @@ class OrchestratorConfig:
     test_prefixes: tuple[str, ...] = ("tests/",)
     rules_file: str = "AGENTS.md"
     max_context_tests: int = 20
+    allow_modifying_existing_tests: bool = False
 
 
 @dataclass(slots=True)
@@ -45,6 +47,7 @@ class _TaskState:
     history: list[str] = field(default_factory=list)
     changed_files: set[str] = field(default_factory=set)
     plan: Plan | None = None
+    preexisting_tests: frozenset[str] = frozenset()
 
 
 @dataclass(slots=True)
@@ -143,27 +146,35 @@ class Orchestrator:
                 )
 
     async def _delivery_loop(self, state: _TaskState, team: _Team, plan: Plan) -> Review:
-        feedback = ""
+        state.preexisting_tests = await self._preexisting_tests()
+        # Cada agente recibe solo el feedback que le corresponde: un error de lint del
+        # Implementer no le llega al Tester como si fuera una falla de sus tests.
+        impl_feedback = ""
+        test_feedback = ""
         while True:
             files = await self._ws.read_many(i.path for i in plan.impacted)
-            implementation = await team.implementer.run(plan=plan, files=files, feedback=feedback)
+            implementation = await team.implementer.run(
+                plan=plan, files=files, feedback=impl_feedback
+            )
             await self._apply(state, implementation, self.config.code_prefixes)
             gate_b = await self._run_gate(state, "B", "implementer")
             if not gate_b.passed:
-                feedback = gate_b.failure_report()
+                impl_feedback = gate_b.failure_report()
                 continue
 
             tests = await team.tester.run(
                 plan=plan,
                 implementation=implementation,
                 existing_tests=await self._existing_tests(),
-                feedback=feedback,
+                feedback=test_feedback,
             )
-            await self._apply(state, tests, self.config.test_prefixes)
+            await self._apply_tests(state, tests)
             gate_c = await self._run_gate(state, "C", "tester")
             if not gate_c.passed:
-                feedback = "Fallaron los tests:\n" + gate_c.failure_report()
+                # La falla puede estar en el código o en el test: la ven los dos agentes.
+                impl_feedback = test_feedback = "Fallaron los tests:\n" + gate_c.failure_report()
                 continue
+            test_feedback = ""
 
             attempt = self._next_attempt(state, "D")
             gate_d = await self._gates.run_gate("D")
@@ -176,8 +187,9 @@ class Orchestrator:
             )
             if approved:
                 return review
-            feedback = self._review_feedback(review, gate_d)
-            self._record_failure(state, "D", attempt, feedback[:500])
+            # El checklist del Reviewer también cubre la calidad de los tests.
+            impl_feedback = test_feedback = self._review_feedback(review, gate_d)
+            self._record_failure(state, "D", attempt, impl_feedback[:500])
 
     # --- helpers ---------------------------------------------------------------
 
@@ -204,6 +216,23 @@ class Orchestrator:
         for change in changes.changes:
             await self._ws.write(change.path, change.content, allowed_prefixes=prefixes)
             state.changed_files.add(change.path)
+
+    async def _apply_tests(self, state: _TaskState, tests: ChangeSet) -> None:
+        """El Tester agrega tests; no reescribe ni debilita los que ya protegían el repo."""
+        for change in tests.changes:
+            key = PurePosixPath(change.path.replace("\\", "/")).as_posix().casefold()
+            if key in state.preexisting_tests:
+                raise GuardrailViolationError(
+                    f"El Tester no puede modificar un test existente: {change.path}"
+                )
+            ensure_no_test_weakening(change.content, where=change.path)
+        await self._apply(state, tests, self.config.test_prefixes)
+
+    async def _preexisting_tests(self) -> frozenset[str]:
+        if self.config.allow_modifying_existing_tests:
+            return frozenset()
+        repo_map = await self._ws.repo_map()
+        return frozenset(p.casefold() for p in repo_map if p.startswith(self.config.test_prefixes))
 
     async def _existing_tests(self) -> dict[str, str]:
         repo_map = await self._ws.repo_map()

@@ -20,5 +20,5 @@ class Tester(Agent):
             f"<tests_existentes>\n{render_files(existing_tests)}\n</tests_existentes>"
         )
         if feedback:
-            prompt += f"\n\n<fallas_de_tests>\n{feedback}\n</fallas_de_tests>"
+            prompt += f"\n\n<correcciones_pedidas>\n{feedback}\n</correcciones_pedidas>"
         return await self._ask(prompt, ChangeSet)

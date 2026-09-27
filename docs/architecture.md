@@ -24,14 +24,14 @@ Prompt Maestro separa **quién decide** (los agentes, apoyados en un modelo) de 
 4. **Implementer → Gate B.** El código se escribe solo en `src/`, pasando por los guardrails. Luego corren `ruff` y `mypy --strict` en paralelo.
 5. **Tester → Gate C.** Un agente distinto escribe los tests en `tests/` y corre `pytest`. Separar autor y tester evita que el mismo agente "acomode" los tests a su propio código.
 6. **Reviewer → Gate D.** `bandit` corre primero y su resultado se le pasa al Reviewer, que revisa el diff contra el plan. La tarea se aprueba solo si ambos pasan y no hay hallazgos `blocker` o `major`.
-7. Cualquier falla en B, C o D vuelve al Implementer con el feedback completo. Cada gate tiene un presupuesto de 3 fallos propios; al agotarse, la tarea se escala con el historial.
+7. Cualquier falla en B, C o D vuelve al Implementer con el feedback completo; las fallas de C y D también le llegan al Tester, porque el error puede estar en el test. Cada gate tiene un presupuesto de 3 fallos propios; al agotarse, la tarea se escala con el historial.
 
 ## Modelo de seguridad
 
 El harness asume que el modelo **puede equivocarse o ser manipulado** (por ejemplo, con instrucciones escondidas en el código que lee). Por eso los controles no dependen de su obediencia:
 
 - **Confinamiento de rutas:** toda ruta se resuelve y se verifica que quede dentro del repo.
-- **Permisos por rol:** el Implementer solo escribe en `src/`, el Tester solo en `tests/`, y nadie modifica `AGENTS.md`, `pyproject.toml` ni el CI. Los permisos se validan sobre la ruta resuelta, así que `..` no sirve para salir del alcance.
+- **Permisos por rol:** el Implementer solo escribe en `src/`, el Tester solo crea tests nuevos en `tests/` (sin `skip` ni `xfail`), y nadie modifica `AGENTS.md`, `pyproject.toml` ni el CI. Los permisos se validan sobre la ruta resuelta, así que `..` no sirve para salir del alcance.
 - **Secretos:** se bloquea la lectura de `.env`, claves y certificados, y se escanea todo contenido antes de escribirlo.
 - **Comandos:** una lista de patrones prohibidos (borrados recursivos, `push --force`, red, instalación de dependencias) se verifica antes de ejecutar.
 - **Entorno:** los procesos hijos heredan solo variables de una allowlist, así que las API keys nunca llegan a los comandos de verificación.

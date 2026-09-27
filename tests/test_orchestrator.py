@@ -181,3 +181,73 @@ async def test_events_are_written_as_jsonl(repo: Path, tmp_path: Path) -> None:
     await _orchestrator(repo, llm, FakeGateRunner(), EventLog(sink)).run("r", task_id="t-9")
     lines = sink.read_text(encoding="utf-8").splitlines()
     assert lines and all('"task_id":"t-9"' in line for line in lines)
+
+
+async def test_tester_does_not_receive_lint_feedback(repo: Path) -> None:
+    llm = ScriptedLLM(
+        {
+            "planner": [plan_json()],
+            "implementer": [IMPL, IMPL],
+            "tester": [TESTS],
+            "reviewer": [review_json()],
+        }
+    )
+    report = await _orchestrator(repo, llm, FakeGateRunner({"B": 1})).run("r")
+    assert report.status is TaskStatus.DONE
+    tester_prompt = next(p for role, p in llm.calls if role == "tester")
+    assert "boom" not in tester_prompt
+
+
+async def test_test_failures_reach_both_implementer_and_tester(repo: Path) -> None:
+    llm = ScriptedLLM(
+        {
+            "planner": [plan_json()],
+            "implementer": [IMPL, IMPL],
+            "tester": [TESTS, TESTS],
+            "reviewer": [review_json()],
+        }
+    )
+    report = await _orchestrator(repo, llm, FakeGateRunner({"C": 1})).run("r")
+    assert report.status is TaskStatus.DONE
+    second_tester = [p for role, p in llm.calls if role == "tester"][1]
+    assert "Fallaron los tests" in second_tester and "boom" in second_tester
+
+
+async def test_tester_cannot_overwrite_existing_tests(repo: Path) -> None:
+    weakened = changes_json("tests/test_calc.py", "def test_add() -> None:\n    pass\n")
+    llm = ScriptedLLM({"planner": [plan_json()], "implementer": [IMPL], "tester": [weakened]})
+    report = await _orchestrator(repo, llm, FakeGateRunner()).run("r")
+    assert report.status is TaskStatus.ESCALATED
+    assert "test existente" in (report.escalation_reason or "")
+    assert "assert add(1, 2) == 3" in (repo / "tests" / "test_calc.py").read_text(encoding="utf-8")
+
+
+async def test_tester_can_modify_existing_tests_when_allowed(repo: Path) -> None:
+    updated = changes_json("tests/test_calc.py", "def test_add() -> None:\n    assert 1 + 2 == 3\n")
+    llm = ScriptedLLM(
+        {
+            "planner": [plan_json()],
+            "implementer": [IMPL],
+            "tester": [updated],
+            "reviewer": [review_json()],
+        }
+    )
+    orchestrator = Orchestrator(
+        llm=llm,
+        workspace=Workspace(repo),
+        gate_runner=FakeGateRunner(),
+        config=OrchestratorConfig(allow_modifying_existing_tests=True),
+    )
+    assert (await orchestrator.run("r")).status is TaskStatus.DONE
+
+
+async def test_skipped_tests_are_rejected(repo: Path) -> None:
+    skipped = changes_json(
+        "tests/test_subtract.py",
+        "import pytest\n\n\n@pytest.mark.skip\ndef test_subtract() -> None:\n    assert False\n",
+    )
+    llm = ScriptedLLM({"planner": [plan_json()], "implementer": [IMPL], "tester": [skipped]})
+    report = await _orchestrator(repo, llm, FakeGateRunner()).run("r")
+    assert report.status is TaskStatus.ESCALATED
+    assert "debilitado" in (report.escalation_reason or "")
+    assert not (repo / "tests" / "test_subtract.py").exists()

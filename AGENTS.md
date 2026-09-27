@@ -27,7 +27,7 @@ Reglas que nunca se negocian:
 | **Orchestrator** | Divide la tarea, asigna agentes, controla los gates y el presupuesto de reintentos | Requerimiento del usuario | Estado de la tarea y handoffs | No |
 | **Planner** | Analiza el repo real y produce un plan de impacto | Requerimiento + mapa del repo | `plan.json` | No |
 | **Implementer** | Implementa el plan con el diff mínimo necesario | `plan.json` | Diff + notas | Sí |
-| **Tester** | Escribe y ejecuta tests del comportamiento pedido | `plan.json` + diff | Tests + reporte | Solo tests |
+| **Tester** | Escribe y ejecuta tests del comportamiento pedido | `plan.json` + diff | Tests + reporte | Solo tests nuevos |
 | **Reviewer** | Revisa seguridad, calidad y cumplimiento del plan | Diff + reportes | `review.json` | No |
 
 Cada agente trabaja solo con el contexto de su handoff. Si necesita más información, la pide al Orchestrator; no la inventa.
@@ -84,7 +84,8 @@ Reglas de contexto:
 |---|---|---|---|---|
 | Leer archivos del repo | ✅ | ✅ | ✅ | ✅ |
 | Modificar código en `src/` | ❌ | ✅ | ❌ | ❌ |
-| Modificar `tests/` | ❌ | ❌ | ✅ | ❌ |
+| Crear tests en `tests/` | ❌ | ❌ | ✅ | ❌ |
+| Modificar tests existentes | ❌ | ❌ | Solo si `allow_modifying_existing_tests` | ❌ |
 | Ejecutar lint, tipos y tests | ❌ | ✅ | ✅ | ✅ |
 | Instalar dependencias | ❌ | Solo con aprobación humana | ❌ | ❌ |
 | Acceso a red externa | ❌ | ❌ | ❌ | ❌ |
