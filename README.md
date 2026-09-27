@@ -98,7 +98,7 @@ Intentos por gate: {'A': 1, 'B': 2, 'C': 2, 'D': 1}
 ```bash
 export ANTHROPIC_API_KEY=...
 prompt-maestro run "Agregá validación de email al registro de usuarios" \
-  --repo ../mi-proyecto --events eventos.jsonl \
+  --repo ../mi-proyecto \
   --container-image mi-proyecto-gates:latest
 ```
 
@@ -112,6 +112,8 @@ PM_TEST_CONTAINER_IMAGE=prompt-maestro-gates pytest tests/test_container_integra
 ```
 
 La salida es un `TaskReport` en JSON con el plan, la revisión, los archivos cambiados, los intentos por gate y, si corresponde, el motivo del escalamiento.
+
+Cada corrida guarda su propia carpeta en `.prompt-maestro/runs/<fecha>-<task_id>/` (o en `--runs-dir`), con `report.json` y `events.jsonl`; si la corrida falla por un error inesperado, deja la traza en `error.txt`. Las corridas nunca se pisan, y esa carpeta queda fuera de git y del mapa del repo que ven los agentes.
 
 Los cambios se escriben directamente en el working tree, sin commits: corré el harness sobre una rama limpia, revisá el diff y abrí el PR vos. Si la tarea escala, los archivos que alcanzó a escribir quedan como están.
 

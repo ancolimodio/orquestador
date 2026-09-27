@@ -4,12 +4,15 @@ import argparse
 import asyncio
 import os
 import sys
+import traceback
+import uuid
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 
 from prompt_maestro.gates import SandboxGateRunner
 from prompt_maestro.llm import AnthropicLLM, HttpLLM, OpenAICompatibleLLM
-from prompt_maestro.models import TaskStatus
+from prompt_maestro.models import TaskReport, TaskStatus
 from prompt_maestro.observability import EventLog
 from prompt_maestro.orchestrator import Orchestrator, OrchestratorConfig
 from prompt_maestro.sandbox import CommandRunner, ContainerSandbox, Sandbox
@@ -40,6 +43,16 @@ PROVIDERS: dict[str, Provider] = {
 }
 
 
+RUNS_DIR = ".prompt-maestro/runs"
+
+
+def new_run_dir(base: Path, task_id: str) -> Path:
+    """Una carpeta por corrida: ordenable por fecha y sin pisar corridas anteriores."""
+    run_dir = base / f"{datetime.now(UTC):%Y%m%dT%H%M%SZ}-{task_id}"
+    run_dir.mkdir(parents=True, exist_ok=False)
+    return run_dir
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="prompt-maestro", description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
@@ -64,7 +77,18 @@ def build_parser() -> argparse.ArgumentParser:
         "http://localhost:11434/v1/).",
     )
     run.add_argument("--max-attempts", type=int, default=3, help="Reintentos por gate.")
-    run.add_argument("--events", type=Path, default=None, help="Archivo JSONL de eventos.")
+    run.add_argument(
+        "--runs-dir",
+        type=Path,
+        default=None,
+        help=f"Dónde guardar una carpeta por corrida (por defecto, <repo>/{RUNS_DIR}).",
+    )
+    run.add_argument(
+        "--events",
+        type=Path,
+        default=None,
+        help="Archivo JSONL de eventos (por defecto, el de la carpeta de la corrida).",
+    )
     run.add_argument(
         "--container-image",
         default=os.environ.get("PM_CONTAINER_IMAGE"),
@@ -108,20 +132,36 @@ async def _run(args: argparse.Namespace) -> int:
     if not model:
         print(f"El proveedor '{args.provider}' requiere --model.", file=sys.stderr)
         return 2
+    task_id = uuid.uuid4().hex[:8]
+    run_dir = await asyncio.to_thread(new_run_dir, args.runs_dir or args.repo / RUNS_DIR, task_id)
+    print(f"Corrida {task_id}: {run_dir}", file=sys.stderr)
     llm = build_llm(args, api_key=api_key, model=model)
     try:
         orchestrator = Orchestrator(
             llm=llm,
             workspace=Workspace(args.repo),
             gate_runner=SandboxGateRunner(build_runner(args)),
-            events=EventLog(args.events),
+            events=EventLog(args.events or run_dir / "events.jsonl"),
             config=OrchestratorConfig(max_attempts_per_gate=args.max_attempts),
         )
-        report = await orchestrator.run(args.requirement)
+        report = await orchestrator.run(args.requirement, task_id=task_id)
+    except Exception:
+        # Un error inesperado no produce TaskReport: se deja la traza en la corrida.
+        await asyncio.to_thread(
+            (run_dir / "error.txt").write_text, traceback.format_exc(), encoding="utf-8"
+        )
+        raise
     finally:
         await llm.aclose()
+    await write_report(run_dir, report)
     print(report.model_dump_json(indent=2))
     return 0 if report.status is TaskStatus.DONE else 1
+
+
+async def write_report(run_dir: Path, report: TaskReport) -> None:
+    await asyncio.to_thread(
+        (run_dir / "report.json").write_text, report.model_dump_json(indent=2), encoding="utf-8"
+    )
 
 
 def main() -> None:

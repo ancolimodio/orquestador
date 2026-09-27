@@ -12,6 +12,7 @@ from prompt_maestro.models import ChangeKind, Plan
 IGNORED_DIRS: frozenset[str] = frozenset(
     {
         ".git",
+        ".prompt-maestro",
         ".venv",
         "venv",
         "__pycache__",
