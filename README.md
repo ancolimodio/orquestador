@@ -148,6 +148,18 @@ asyncio.run(main())
 
 El modelo es intercambiable: cualquier clase que implemente el `Protocol` `LLMClient` funciona, lo que permite usar otros proveedores o `ScriptedLLM` para evals reproducibles.
 
+## Proveedores
+
+El CLI elige el proveedor con `--provider`, y cada uno lee su key de su propia variable de entorno:
+
+| `--provider` | Variable de la key | Modelo por defecto | Notas |
+|---|---|---|---|
+| `anthropic` | `ANTHROPIC_API_KEY` | `claude-sonnet-5` | Opción por defecto |
+| `gemini` | `GEMINI_API_KEY` | `gemini-3.8-flash` | Endpoint compatible con OpenAI. El plan gratuito limita pedidos por minuto y Google puede usar los prompts para entrenar |
+| `openai` | `OPENAI_API_KEY` | — (requiere `--model`) | Cualquier API compatible con Chat Completions; con `--base-url` sirve para Ollama u otros servidores locales |
+
+Ante un 429, el cliente respeta el `Retry-After` del proveedor (hasta 60 s) y, si no viene, usa backoff exponencial.
+
 ## Decisiones de diseño
 
 - **Async-first.** Todo el I/O usa `asyncio`: concurrencia estructurada con `TaskGroup`, timeouts en cada llamada externa, `Semaphore` para respetar rate limits y `to_thread` para I/O de disco. Ninguna llamada bloquea el event loop.

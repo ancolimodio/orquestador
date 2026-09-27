@@ -4,7 +4,7 @@ import httpx
 import pytest
 
 from prompt_maestro.errors import LLMError
-from prompt_maestro.llm import AnthropicLLM, ScriptedLLM
+from prompt_maestro.llm import AnthropicLLM, OpenAICompatibleLLM, ScriptedLLM
 
 
 def _ok(text: str) -> httpx.Response:
@@ -74,3 +74,70 @@ async def test_anthropic_client_fails_after_transport_errors(
 async def test_scripted_llm_without_responses_fails() -> None:
     with pytest.raises(LLMError):
         await ScriptedLLM({}).complete(role="planner", system="", prompt="")
+
+
+async def test_openai_compatible_client_sends_chat_completions_request() -> None:
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(200, json={"choices": [{"message": {"content": '{"ok": true}'}}]})
+
+    llm = OpenAICompatibleLLM(
+        api_key="k",
+        model="gemini-x",
+        base_url="https://example.test/v1beta/openai/",
+        transport=httpx.MockTransport(handler),
+    )
+    text = await llm.complete(role="planner", system="sys", prompt="hola")
+    await llm.aclose()
+
+    assert text == '{"ok": true}'
+    assert str(seen[0].url) == "https://example.test/v1beta/openai/chat/completions"
+    assert seen[0].headers["authorization"] == "Bearer k"
+    body = json.loads(seen[0].content)
+    assert body["model"] == "gemini-x"
+    assert body["messages"] == [
+        {"role": "system", "content": "sys"},
+        {"role": "user", "content": "hola"},
+    ]
+
+
+async def test_openai_compatible_client_rejects_malformed_response() -> None:
+    llm = OpenAICompatibleLLM(
+        api_key="k",
+        model="m",
+        base_url="https://example.test/",
+        transport=httpx.MockTransport(lambda _: httpx.Response(200, json={"choices": []})),
+    )
+    with pytest.raises(LLMError, match="choices"):
+        await llm.complete(role="r", system="s", prompt="p")
+    await llm.aclose()
+
+
+async def test_rate_limit_waits_what_the_provider_asks(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Con límites por minuto, el backoff corto no alcanza: se respeta Retry-After."""
+    waits: list[float] = []
+
+    async def fake_sleep(seconds: float) -> None:
+        waits.append(seconds)
+
+    responses = iter(
+        [
+            httpx.Response(429, headers={"retry-after": "20"}, text="slow down"),
+            httpx.Response(429, headers={"retry-after": "3600"}, text="slow down"),
+            httpx.Response(429, text="slow down"),
+            _ok("listo"),
+        ]
+    )
+    monkeypatch.setattr("prompt_maestro.llm.asyncio.sleep", fake_sleep)
+    llm = AnthropicLLM(
+        api_key="k",
+        max_retries=4,
+        backoff_base_s=2.0,
+        transport=httpx.MockTransport(lambda _: next(responses)),
+    )
+    assert await llm.complete(role="r", system="s", prompt="p") == "listo"
+    await llm.aclose()
+    # Retry-After respetado, acotado a 60 s, y backoff exponencial cuando no viene.
+    assert waits == [20.0, 60.0, 8.0]
