@@ -46,3 +46,11 @@ class EventLog:
             if ev.action == "gate" and ev.result == "fail":
                 rejections[ev.phase] = rejections.get(ev.phase, 0) + 1
         return rejections
+
+    def phase_durations(self) -> dict[str, int]:
+        """Totaliza duration_ms por fase excluyendo eventos sin duración."""
+        durations: dict[str, int] = {}
+        for ev in self.events:
+            if ev.duration_ms is not None:
+                durations[ev.phase] = durations.get(ev.phase, 0) + ev.duration_ms
+        return durations

@@ -7,6 +7,7 @@
 - Guardrail contra tests debilitados (`skip`, `skipif`, `xfail`) y contra sobrescribir tests existentes.
 - `OpenAICompatibleLLM` y `--provider anthropic|gemini|openai` en el CLI: Gemini, OpenAI u Ollama además de Anthropic.
 - Los clientes HTTP respetan `Retry-After` ante un 429, para planes con límites por minuto.
+- `EventLog.phase_durations()`: tiempo total por fase. Es la primera feature que escribieron los propios agentes del harness.
 
 ### Corregido
 - El Gate A rechazaba planes correctos que declaraban métodos nuevos: el plan ahora distingue `symbols` de `new_symbols`.
