@@ -9,7 +9,27 @@ from pathlib import Path
 from prompt_maestro.guardrails import check_command
 from prompt_maestro.models import CheckResult
 
-SAFE_ENV_KEYS: tuple[str, ...] = ("PATH", "HOME", "LANG", "LC_ALL", "VIRTUAL_ENV", "PYTHONPATH")
+SAFE_ENV_KEYS: tuple[str, ...] = (
+    "PATH",
+    "HOME",
+    "LANG",
+    "LC_ALL",
+    "TMPDIR",
+    "VIRTUAL_ENV",
+    "PYTHONPATH",
+    # Windows: sin SYSTEMROOT, Python no puede inicializar sockets ni importar asyncio
+    # (WinError 10106). Son rutas del sistema, no secretos.
+    "SYSTEMROOT",
+    "SYSTEMDRIVE",
+    "WINDIR",
+    "COMSPEC",
+    "PATHEXT",
+    "TEMP",
+    "TMP",
+    "USERPROFILE",
+    "APPDATA",
+    "LOCALAPPDATA",
+)
 
 
 class Sandbox:

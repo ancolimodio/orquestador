@@ -8,6 +8,7 @@ para mostrar el loop de verificación en acción.
 """
 
 import asyncio
+import io
 import json
 import sys
 import tempfile
@@ -104,4 +105,7 @@ async def main() -> int:
 
 
 if __name__ == "__main__":
+    # La consola de Windows usa cp1252 por defecto y no puede imprimir "→".
+    if isinstance(sys.stdout, io.TextIOWrapper):
+        sys.stdout.reconfigure(encoding="utf-8")
     raise SystemExit(asyncio.run(main()))

@@ -60,3 +60,17 @@ async def test_gate_runner_runs_checks_in_parallel(tmp_path: Path) -> None:
 async def test_unknown_gate_passes_empty(tmp_path: Path) -> None:
     result = await SandboxGateRunner(Sandbox(tmp_path), {}).run_gate("Z")
     assert result.passed and result.checks == []
+
+
+async def test_host_sandbox_can_run_asyncio_programs(tmp_path: Path) -> None:
+    """Regresión: en Windows, sin SYSTEMROOT, `import asyncio` falla con WinError 10106."""
+    code = "import asyncio; print(asyncio.run(asyncio.sleep(0, 'ok')))"
+    result = await Sandbox(tmp_path).run([sys.executable, "-c", code], name="asyncio")
+    assert result.passed, result.output
+    assert result.output.strip() == "ok"
+
+
+def test_system_paths_are_forwarded_but_secrets_are_not(tmp_path: Path) -> None:
+    env = {"SYSTEMROOT": r"C:\Windows", "PATH": "/bin", "GITHUB_TOKEN": "leak"}
+    forwarded = Sandbox(tmp_path, env=env)._env
+    assert forwarded == {"SYSTEMROOT": r"C:\Windows", "PATH": "/bin"}
