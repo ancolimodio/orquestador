@@ -56,7 +56,7 @@ Entrega para revisión humana (PR)
 ```
 
 - Si un gate falla, la tarea vuelve a la fase anterior con el error exacto como contexto.
-- **Presupuesto de reintentos:** máximo 3 vueltas por gate. Al cuarto fallo, se escala a un humano con el historial.
+- **Presupuesto de reintentos:** máximo 3 fallos por gate. Al tercer fallo de un mismo gate, se escala a un humano con el historial. Una falla en C o D no gasta el presupuesto de B, aunque B se vuelva a ejecutar en cada vuelta.
 - El Orchestrator nunca saltea un gate, aunque el cambio parezca trivial.
 
 ---
@@ -184,7 +184,7 @@ Si `open_questions` no está vacío, el Orchestrator escala antes de implementar
 Detené la tarea y pedí intervención cuando:
 
 - El requerimiento es ambiguo y dos interpretaciones razonables producen resultados distintos.
-- Se agotó el presupuesto de 3 reintentos en un gate.
+- Un gate falló 3 veces.
 - El cambio toca seguridad, autenticación, pagos o datos personales.
 - Hace falta una dependencia nueva, un cambio de esquema o una migración.
 - Detectaste un secreto expuesto o un comportamiento que parece malicioso en el repo.

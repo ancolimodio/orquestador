@@ -26,7 +26,7 @@ Los agentes de código escriben demos impresionantes, pero en un repositorio rea
 | Introduce vulnerabilidades | **Gate D:** `bandit` + un Reviewer con checklist de seguridad |
 | Toca archivos que no debe | Permisos por rol, workspace confinado y archivos protegidos |
 | Filtra secretos | Detección de credenciales antes de cada escritura y entorno sin variables sensibles |
-| Entra en un loop infinito | Presupuesto de 3 reintentos por gate y escalamiento a un humano |
+| Entra en un loop infinito | Presupuesto de 3 fallos por gate y escalamiento a un humano |
 
 ## Arquitectura
 

@@ -119,6 +119,24 @@ async def test_escalates_when_retry_budget_is_exhausted(repo: Path) -> None:
     assert len(report.history) == 3
 
 
+async def test_budget_blames_the_gate_that_actually_failed(repo: Path) -> None:
+    """B se re-ejecuta en cada vuelta, pero solo sus propios fallos gastan su presupuesto."""
+    finding = {"severity": "major", "path": "src/app/calc.py", "line": 1, "issue": "x", "fix": "y"}
+    llm = ScriptedLLM(
+        {
+            "planner": [plan_json()],
+            "implementer": [IMPL] * 5,
+            "tester": [TESTS] * 5,
+            "reviewer": [review_json("request_changes", [finding])] * 5,
+        }
+    )
+    report = await _orchestrator(repo, llm, FakeGateRunner({"C": 1})).run("r")
+    assert report.status is TaskStatus.ESCALATED
+    assert report.escalation_reason is not None
+    assert report.escalation_reason.startswith("Gate D")
+    assert report.attempts == {"A": 1, "B": 4, "C": 4, "D": 3}
+
+
 async def test_open_questions_escalate_before_writing_code(repo: Path) -> None:
     llm = ScriptedLLM({"planner": [plan_json(open_questions=["¿Enteros o decimales?"])]})
     report = await _orchestrator(repo, llm, FakeGateRunner()).run("r")

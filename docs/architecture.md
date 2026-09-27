@@ -24,7 +24,7 @@ Prompt Maestro separa **quién decide** (los agentes, apoyados en un modelo) de 
 4. **Implementer → Gate B.** El código se escribe solo en `src/`, pasando por los guardrails. Luego corren `ruff` y `mypy --strict` en paralelo.
 5. **Tester → Gate C.** Un agente distinto escribe los tests en `tests/` y corre `pytest`. Separar autor y tester evita que el mismo agente "acomode" los tests a su propio código.
 6. **Reviewer → Gate D.** `bandit` corre primero y su resultado se le pasa al Reviewer, que revisa el diff contra el plan. La tarea se aprueba solo si ambos pasan y no hay hallazgos `blocker` o `major`.
-7. Cualquier falla en B, C o D vuelve al Implementer con el feedback completo. Cada gate tiene un presupuesto de 3 intentos; al agotarse, la tarea se escala con el historial.
+7. Cualquier falla en B, C o D vuelve al Implementer con el feedback completo. Cada gate tiene un presupuesto de 3 fallos propios; al agotarse, la tarea se escala con el historial.
 
 ## Modelo de seguridad
 

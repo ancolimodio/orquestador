@@ -41,6 +41,7 @@ class OrchestratorConfig:
 class _TaskState:
     task_id: str
     attempts: dict[str, int] = field(default_factory=dict)
+    failures: dict[str, int] = field(default_factory=dict)
     history: list[str] = field(default_factory=list)
     changed_files: set[str] = field(default_factory=set)
     plan: Plan | None = None
@@ -112,7 +113,7 @@ class Orchestrator:
         repo_map = await self._ws.repo_map()
         feedback = ""
         while True:
-            attempt = self._consume_attempt(state, "A")
+            attempt = self._next_attempt(state, "A")
             plan = await team.planner.run(
                 task_id=state.task_id, requirement=requirement, repo_map=repo_map, feedback=feedback
             )
@@ -122,8 +123,7 @@ class Orchestrator:
             if not errors:
                 return plan
             feedback = "\n".join(errors)
-            state.history.append(f"Gate A (intento {attempt}): {feedback}")
-            self._ensure_budget_left(state, "A")
+            self._record_failure(state, "A", attempt, feedback)
 
     def _check_escalation_rules(self, plan: Plan) -> None:
         if plan.open_questions:
@@ -165,11 +165,11 @@ class Orchestrator:
                 feedback = "Fallaron los tests:\n" + gate_c.failure_report()
                 continue
 
-            gate_d = await self._run_gate(state, "D", "reviewer", consume=False)
+            attempt = self._next_attempt(state, "D")
+            gate_d = await self._gates.run_gate("D")
             review = await team.reviewer.run(
                 plan=plan, implementation=implementation, tests=tests, static_analysis=gate_d
             )
-            attempt = self._consume_attempt(state, "D")
             approved = gate_d.passed and review.approved
             await self._emit(
                 state, "reviewer", "D", "gate", "pass" if approved else "fail", attempt=attempt
@@ -177,30 +177,25 @@ class Orchestrator:
             if approved:
                 return review
             feedback = self._review_feedback(review, gate_d)
-            state.history.append(f"Gate D (intento {attempt}): {feedback[:500]}")
-            self._ensure_budget_left(state, "D")
+            self._record_failure(state, "D", attempt, feedback[:500])
 
     # --- helpers ---------------------------------------------------------------
 
-    async def _run_gate(
-        self, state: _TaskState, gate: str, agent: str, *, consume: bool = True
-    ) -> GateResult:
-        attempt = self._consume_attempt(state, gate) if consume else state.attempts.get(gate, 0)
+    async def _run_gate(self, state: _TaskState, gate: str, agent: str) -> GateResult:
+        attempt = self._next_attempt(state, gate)
         started = time.perf_counter()
         result = await self._gates.run_gate(gate)
-        if consume:
-            await self._emit(
-                state,
-                agent,
-                gate,
-                "gate",
-                "pass" if result.passed else "fail",
-                attempt=attempt,
-                duration_ms=int((time.perf_counter() - started) * 1000),
-            )
-            if not result.passed:
-                state.history.append(f"Gate {gate} (intento {attempt}): falló")
-                self._ensure_budget_left(state, gate)
+        await self._emit(
+            state,
+            agent,
+            gate,
+            "gate",
+            "pass" if result.passed else "fail",
+            attempt=attempt,
+            duration_ms=int((time.perf_counter() - started) * 1000),
+        )
+        if not result.passed:
+            self._record_failure(state, gate, attempt, "falló")
         return result
 
     async def _apply(
@@ -217,22 +212,26 @@ class Orchestrator:
         ][: self.config.max_context_tests]
         return await self._ws.read_many(paths)
 
-    def _consume_attempt(self, state: _TaskState, gate: str) -> int:
+    @staticmethod
+    def _next_attempt(state: _TaskState, gate: str) -> int:
+        """Cuenta ejecuciones del gate; es lo que reporta `TaskReport.attempts`."""
         attempt = state.attempts.get(gate, 0) + 1
         state.attempts[gate] = attempt
-        if attempt > self.config.max_attempts_per_gate:
-            raise EscalationRequiredError(
-                f"Gate {gate}: se agotó el presupuesto de "
-                f"{self.config.max_attempts_per_gate} reintentos."
-            )
         return attempt
 
-    def _ensure_budget_left(self, state: _TaskState, gate: str) -> None:
-        """Escala apenas falla el último intento: no gasta una llamada al modelo de más."""
-        if state.attempts.get(gate, 0) >= self.config.max_attempts_per_gate:
+    def _record_failure(self, state: _TaskState, gate: str, attempt: int, detail: str) -> None:
+        """El presupuesto cuenta fallos propios del gate, no vueltas del loop.
+
+        Así una falla en C o D no consume el presupuesto de B, que se re-ejecuta en cada
+        vuelta. Escala apenas se alcanza el máximo: no gasta una llamada al modelo de más.
+        """
+        state.history.append(f"Gate {gate} (intento {attempt}): {detail}")
+        failures = state.failures.get(gate, 0) + 1
+        state.failures[gate] = failures
+        if failures >= self.config.max_attempts_per_gate:
             raise EscalationRequiredError(
-                f"Gate {gate}: se agotó el presupuesto de "
-                f"{self.config.max_attempts_per_gate} reintentos."
+                f"Gate {gate}: falló {failures} veces, se agotó el presupuesto de "
+                f"{self.config.max_attempts_per_gate} intentos."
             )
 
     @staticmethod
